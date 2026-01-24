@@ -1,13 +1,25 @@
 # MoeNet Core
 
-MoeNet DN42 Auto-Peering Platform - API and Web Frontend
+Complete rewrite of MoeNet DN42 Control Plane and Telegram Bot using Bun + Hono.js + grammY.
 
-## Tech Stack
+## Architecture
 
-- **API**: Bun + Hono.js + Sequelize
-- **Web**: Vue 3 + Vite + Ant Design Vue
-- **Database**: PostgreSQL
-- **Cache**: Redis
+```
+moenet-core/
+├── packages/
+│   ├── api/          # Hono.js REST API
+│   │   └── src/
+│   │       ├── handlers/   # Agent, Auth, Peering, Admin
+│   │       ├── db/         # Sequelize models
+│   │       └── providers/  # WHOIS
+│   │
+│   └── bot/          # grammY Telegram Bot
+│       └── src/
+│           ├── commands/   # User, Peer, Tools, Admin
+│           └── i18n/       # Bilingual messages
+│
+└── docker-compose.yml
+```
 
 ## Quick Start
 
@@ -15,57 +27,43 @@ MoeNet DN42 Auto-Peering Platform - API and Web Frontend
 # Install dependencies
 bun install
 
-# Start API (development)
-bun run dev:api
+# Copy environment file
+cp .env.example .env
+# Edit .env with your values
 
-# Start with Docker
-docker compose up -d
+# Development
+bun run dev
+
+# Production (Docker)
+docker-compose up -d
 ```
-
-## Project Structure
-
-```
-moenet-core/
-├── packages/
-│   ├── api/              # Backend API (Hono.js)
-│   │   ├── src/
-│   │   │   ├── handlers/ # HTTP handlers
-│   │   │   ├── services/ # Business logic
-│   │   │   ├── db/       # Database models
-│   │   │   └── common/   # Utilities
-│   │   └── Dockerfile
-│   │
-│   └── web/              # Frontend (Vue 3)
-│       └── src/
-│
-└── docker-compose.yml
-```
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/agent/:router/sessions` | GET | Get BGP sessions |
-| `/agent/:router/modify` | POST | Modify session status |
-| `/agent/:router/report` | POST | Report metrics |
-| `/agent/:router/heartbeat` | POST | Agent heartbeat |
-| `/auth` | POST | Authentication |
-| `/session` | POST | Peering management |
 
 ## Environment Variables
 
-```env
-PORT=3000
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=moenet
-DB_USER=moenet
-DB_PASSWORD=
-REDIS_HOST=localhost
-AGENT_API_KEY=
-JWT_SECRET=
-```
+See `.env.example` for all available configuration options.
+
+Required:
+
+- `TELEGRAM_BOT_TOKEN` - Telegram bot token from @BotFather
+- `DB_PASSWORD` - PostgreSQL password
+- `JWT_SECRET` - Secret for JWT tokens
+
+## Bot Commands
+
+| Category | Commands |
+|----------|----------|
+| User | /login, /logout, /whoami |
+| Peer | /peer, /info, /modify, /remove, /restart |
+| Tools | /ping, /tcping, /trace, /route, /path, /whois, /dig, /findnoc |
+| Admin | /approve, /reject, /nodes |
+| Stats | /stats, /rank, /peerlist, /community, /latency |
+
+## API Endpoints
+
+- `POST /agent` - Agent API (sessions, modify, report, heartbeat)
+- `POST /auth` - Authentication (query, request, challenge)
+- `POST /session` - Peering management
+- `POST /admin` - Admin operations
 
 ## License
 
