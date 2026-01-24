@@ -5,7 +5,7 @@
  * dynamic configuration from the control plane database.
  */
 
-import config from './config';
+import config from '../config';
 
 interface RouterInfo {
     uuid: string;
