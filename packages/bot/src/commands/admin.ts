@@ -161,4 +161,74 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             await ctx.reply('❌ Failed to reject session.');
         }
     });
+
+    /**
+     * /pending - List all pending peer requests
+     */
+    bot.command('pending', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.reply('❌ Admin access required.');
+            return;
+        }
+
+        try {
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'enumSessions',
+                status: 3, // PENDING_REVIEW
+            }, config.apiToken) as ApiResponse;
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Error: ${result.message}`);
+                return;
+            }
+
+            const sessions = result.data?.sessions || [];
+
+            if (sessions.length === 0) {
+                await ctx.reply('✅ No pending requests.\n没有待审批的请求。');
+                return;
+            }
+
+            let message = `📋 *Pending Requests (${sessions.length})*\n待审批请求\n\n`;
+
+            sessions.forEach((s: SessionInfo) => {
+                const endpoint = s.ipv4EndpointAddress || s.ipv6EndpointAddress || 'N/A';
+                message += `• *AS${s.asn}* → ${s.router}\n`;
+                message += `  Endpoint: \`${endpoint}\`\n`;
+                message += `  ID: \`${s.uuid.slice(0, 8)}...\`\n\n`;
+            });
+
+            message += '_Use /approve or /reject <uuid>_';
+
+            await ctx.reply(message, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('[Pending] Error:', error);
+            await ctx.reply('❌ Failed to fetch pending requests.');
+        }
+    });
+}
+
+// Type definitions
+interface ApiResponse {
+    code: number;
+    message: string;
+    data?: {
+        sessions?: SessionInfo[];
+        routers?: RouterInfo[];
+    };
+}
+
+interface SessionInfo {
+    uuid: string;
+    asn: number;
+    router: string;
+    ipv4EndpointAddress?: string;
+    ipv6EndpointAddress?: string;
+}
+
+interface RouterInfo {
+    name: string;
+    location: string;
+    sessionCount: number;
+    isOpen: boolean;
 }
