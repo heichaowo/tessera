@@ -1,0 +1,49 @@
+import * as bcrypt from 'bcrypt';
+
+/**
+ * Hash a string with bcrypt
+ */
+export async function bcryptHash(value: string, rounds = 10): Promise<string> {
+    return bcrypt.hash(value, rounds);
+}
+
+/**
+ * Compare a string with bcrypt hash
+ */
+export async function bcryptCompare(value: string, hash: string): Promise<boolean> {
+    return bcrypt.compare(value, hash);
+}
+
+/**
+ * Generate a random UUID
+ */
+export function generateUUID(): string {
+    return crypto.randomUUID();
+}
+
+/**
+ * Parse JSON extensions safely
+ */
+export function parseExtensions(extensions: string | null): string[] {
+    if (!extensions) return [];
+    try {
+        return JSON.parse(extensions);
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Calculate WireGuard interface name from ASN
+ */
+export function getInterfaceName(asn: number): string {
+    return `wg_${asn}`;
+}
+
+/**
+ * Extract region from router name (e.g., "hk-edge" -> "hk")
+ */
+export function extractRegion(routerName: string): string {
+    const parts = routerName.split('-');
+    return parts[0] || routerName;
+}

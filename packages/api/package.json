@@ -1,0 +1,26 @@
+{
+    "name": "@moenet/api",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "bun run --watch src/app.ts",
+        "start": "bun run src/app.ts",
+        "build": "bun build src/app.ts --outdir=dist --target=bun",
+        "lint": "bunx @biomejs/biome check src/",
+        "test": "bun test"
+    },
+    "dependencies": {
+        "hono": "^4.6.0",
+        "sequelize": "^6.37.0",
+        "pg": "^8.13.0",
+        "pg-hstore": "^2.3.4",
+        "ioredis": "^5.4.0",
+        "bcrypt": "^5.1.1",
+        "jsonwebtoken": "^9.0.2"
+    },
+    "devDependencies": {
+        "@types/bcrypt": "^5.0.2",
+        "@types/jsonwebtoken": "^9.0.7",
+        "@types/pg": "^8.11.10"
+    }
+}
