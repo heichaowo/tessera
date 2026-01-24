@@ -1,101 +1,40 @@
 /**
- * WHOIS Provider for DN42 registry queries
+ * WHOIS Provider using Burble Explorer REST API
  * 
- * Native implementation using Bun TCP for WHOIS queries
- * to avoid npm whois package ESM compatibility issues.
+ * Uses https://explorer.burble.com/api/registry/ to query DN42 registry.
+ * This works without DN42 network connectivity.
  */
 export class WhoisProvider {
-    private server: string;
-    private port: number;
+    private baseUrl: string;
 
-    constructor(server = 'whois.dn42', port = 43) {
-        this.server = server;
-        this.port = port;
+    constructor(baseUrl = 'https://explorer.burble.com/api/registry') {
+        this.baseUrl = baseUrl;
     }
 
     /**
      * Lookup a DN42 object (ASN, maintainer, person, etc.)
      */
-    async lookup(query: string): Promise<string | null> {
+    async lookup(query: string): Promise<RegistryObject | null> {
         try {
-            const socket = await Bun.connect({
-                hostname: this.server,
-                port: this.port,
-                socket: {
-                    data(socket, data) {
-                        // Data is handled via accumulator below
-                    },
-                    close() { },
-                    error(socket, error) {
-                        console.error(`[WHOIS] Socket error:`, error);
-                    },
-                },
-            });
+            // Determine object type from query
+            const objectType = this.detectObjectType(query);
+            const objectKey = this.formatObjectKey(query, objectType);
 
-            // Send query
-            socket.write(`${query}\r\n`);
+            const response = await fetch(`${this.baseUrl}/${objectType}/${objectKey}`);
 
-            // Read response with timeout
-            const chunks: Uint8Array[] = [];
-            const decoder = new TextDecoder();
+            if (!response.ok) {
+                console.error(`[WHOIS] API returned ${response.status} for ${query}`);
+                return null;
+            }
 
-            return new Promise((resolve) => {
-                const timeout = setTimeout(() => {
-                    socket.end();
-                    resolve(chunks.length > 0 ? decoder.decode(Buffer.concat(chunks)) : null);
-                }, 5000);
+            const data = await response.json();
+            const key = `${objectType}/${objectKey}`;
 
-                socket.data = (data) => {
-                    chunks.push(new Uint8Array(data));
-                };
-
-                socket.drain = () => {
-                    clearTimeout(timeout);
-                    socket.end();
-                    resolve(decoder.decode(Buffer.concat(chunks)));
-                };
-            });
+            return data[key] || null;
         } catch (error) {
             console.error(`[WHOIS] Error looking up ${query}:`, error);
             return null;
         }
-    }
-
-    /**
-     * Parse WHOIS response into key-value pairs
-     */
-    parseWhois(whoisText: string): Record<string, string | string[]> {
-        const lines = whoisText.split('\n');
-        const parsed: Record<string, string | string[]> = {};
-
-        for (const line of lines) {
-            const trimmed = line.trim();
-
-            // Skip comments and empty lines
-            if (trimmed.startsWith('%') || trimmed === '') {
-                continue;
-            }
-
-            // Split by first colon
-            const colonIndex = trimmed.indexOf(':');
-            if (colonIndex === -1) continue;
-
-            const key = trimmed.substring(0, colonIndex).trim();
-            const value = trimmed.substring(colonIndex + 1).trim();
-
-            // Handle multiple values for same key
-            if (parsed[key]) {
-                if (Array.isArray(parsed[key])) {
-                    (parsed[key] as string[]).push(value);
-                } else {
-                    parsed[key] = [parsed[key] as string, value];
-                }
-            } else {
-                parsed[key] = value;
-            }
-        }
-
-        return parsed;
     }
 
     /**
@@ -114,16 +53,21 @@ export class WhoisProvider {
             const asnData = await this.lookup(`AS${asn}`);
             if (!asnData) return result;
 
-            const parsed = this.parseWhois(asnData);
-            result.person = this.getFirstValue(parsed['descr']) || `AS${asn}`;
+            // Get description for person name
+            result.person = this.getAttr(asnData, 'as-name') || `AS${asn}`;
 
             // Get admin-c and mnt-by references
-            const adminC = this.getAllValues(parsed['admin-c']);
-            const mntBy = this.getAllValues(parsed['mnt-by']);
+            const adminC = this.extractRef(this.getAttr(asnData, 'admin-c'));
+            const mntBy = this.extractRef(this.getAttr(asnData, 'mnt-by'));
 
-            // Look up each reference for auth info
-            for (const ref of [...adminC, ...mntBy]) {
-                await this.extractAuthFromRef(ref, result);
+            // Look up maintainer for auth info
+            if (mntBy) {
+                await this.extractAuthFromMntner(mntBy, result);
+            }
+
+            // Look up person for contact info
+            if (adminC) {
+                await this.extractContactFromPerson(adminC, result);
             }
 
         } catch (error) {
@@ -134,66 +78,104 @@ export class WhoisProvider {
     }
 
     /**
-     * Extract auth methods from a maintainer or person reference
+     * Extract auth methods from maintainer
      */
-    private async extractAuthFromRef(ref: string, result: AuthMethods): Promise<void> {
-        try {
-            const data = await this.lookup(ref);
-            if (!data) return;
+    private async extractAuthFromMntner(mntner: string, result: AuthMethods): Promise<void> {
+        const data = await this.lookup(mntner);
+        if (!data) return;
 
-            const parsed = this.parseWhois(data);
+        // Get all auth entries
+        const authAttrs = this.getAllAttrs(data, 'auth');
 
-            // Get person name
-            if (parsed['person'] && !result.person) {
-                result.person = this.getFirstValue(parsed['person']) || result.person;
+        for (const auth of authAttrs) {
+            if (auth.startsWith('ssh-')) {
+                result.sshKeys.push(auth);
+            } else if (auth.startsWith('pgp-fingerprint ')) {
+                result.pgpFingerprints.push(auth.replace('pgp-fingerprint ', ''));
+            } else if (auth.startsWith('PGPKEY-')) {
+                result.pgpFingerprints.push(auth.replace('PGPKEY-', ''));
             }
-
-            // Get PGP fingerprints
-            const pgpFingerprints = this.getAllValues(parsed['pgp-fingerprint']);
-            result.pgpFingerprints.push(...pgpFingerprints);
-
-            // Get emails/contacts
-            const emails = [
-                ...this.getAllValues(parsed['contact']),
-                ...this.getAllValues(parsed['e-mail']),
-                ...this.getAllValues(parsed['email']),
-            ];
-            for (const email of emails) {
-                const match = email.match(/[\w.-]+@[\w.-]+\.\w+/);
-                if (match) {
-                    result.emails.push(match[0].toLowerCase());
-                }
-            }
-
-            // Get SSH keys from auth entries
-            const authEntries = this.getAllValues(parsed['auth']);
-            for (const auth of authEntries) {
-                if (auth.includes('ssh-')) {
-                    result.sshKeys.push(auth);
-                } else if (auth.includes('pgp-fingerprint')) {
-                    const parts = auth.split(/\s+/);
-                    const fpIndex = parts.indexOf('pgp-fingerprint');
-                    if (fpIndex !== -1 && parts[fpIndex + 1]) {
-                        result.pgpFingerprints.push(parts[fpIndex + 1]);
-                    }
-                }
-            }
-
-        } catch (error) {
-            console.error(`[WHOIS] Error extracting auth from ${ref}:`, error);
         }
     }
 
-    private getFirstValue(value: string | string[] | undefined): string | undefined {
-        if (Array.isArray(value)) return value[0];
-        return value;
+    /**
+     * Extract contact info from person
+     */
+    private async extractContactFromPerson(person: string, result: AuthMethods): Promise<void> {
+        const data = await this.lookup(person);
+        if (!data) return;
+
+        // Get person name
+        const personName = this.getAttr(data, 'person');
+        if (personName) result.person = personName;
+
+        // Get emails
+        const email = this.getAttr(data, 'e-mail');
+        if (email) result.emails.push(email.toLowerCase());
+
+        // Get contact (might contain email or telegram)
+        const contact = this.getAttr(data, 'contact');
+        if (contact) {
+            const emailMatch = contact.match(/[\w.-]+@[\w.-]+\.\w+/);
+            if (emailMatch) {
+                result.emails.push(emailMatch[0].toLowerCase());
+            }
+        }
     }
 
-    private getAllValues(value: string | string[] | undefined): string[] {
-        if (!value) return [];
-        if (Array.isArray(value)) return value;
-        return [value];
+    /**
+     * Detect object type from query
+     */
+    private detectObjectType(query: string): string {
+        const q = query.toUpperCase();
+        if (q.startsWith('AS') && /^\d+$/.test(q.substring(2))) return 'aut-num';
+        if (q.endsWith('-MNT')) return 'mntner';
+        if (q.endsWith('-DN42')) return 'person';
+        if (q.includes('/')) return q.includes(':') ? 'route6' : 'route';
+        if (q.includes(':')) return 'inet6num';
+        if (/^\d+\.\d+\.\d+\.\d+/.test(q)) return 'inetnum';
+        return 'mntner'; // Default
     }
+
+    /**
+     * Format object key for API
+     */
+    private formatObjectKey(query: string, type: string): string {
+        if (type === 'aut-num') {
+            return query.toUpperCase();
+        }
+        return query;
+    }
+
+    /**
+     * Extract reference from markdown link format "[NAME](type/NAME)"
+     */
+    private extractRef(value: string | undefined): string | undefined {
+        if (!value) return undefined;
+
+        const match = value.match(/\[([^\]]+)\]/);
+        return match ? match[1] : value;
+    }
+
+    /**
+     * Get single attribute value
+     */
+    private getAttr(obj: RegistryObject, key: string): string | undefined {
+        const attr = obj.Attributes?.find(a => a[0] === key);
+        return attr ? attr[1] : undefined;
+    }
+
+    /**
+     * Get all attribute values for a key
+     */
+    private getAllAttrs(obj: RegistryObject, key: string): string[] {
+        return obj.Attributes?.filter(a => a[0] === key).map(a => a[1]) || [];
+    }
+}
+
+interface RegistryObject {
+    Attributes: [string, string][];
+    Backlinks?: string[];
 }
 
 export interface AuthMethods {
