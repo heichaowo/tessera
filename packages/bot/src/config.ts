@@ -12,13 +12,9 @@ export default {
     adminUsername: process.env.TELEGRAM_ADMIN_USERNAME || '',
     localAsn: Number(process.env.LOCAL_ASN) || 4242420998,
 
-    // Agent settings for distributed tools
-    agentHosts: JSON.parse(process.env.AGENT_HOSTS || '{}') as Record<string, string>,
+    // Agent default port (used when router doesn't have callbackUrl)
     agentPort: Number(process.env.AGENT_PORT) || 8080,
     agentToken: process.env.AGENT_TOKEN || '',
-
-    // Node display names
-    nodeNames: JSON.parse(process.env.NODE_NAMES || '{}') as Record<string, string>,
 
     // Webhook settings
     webhookEnabled: process.env.WEBHOOK_ENABLED === 'true',

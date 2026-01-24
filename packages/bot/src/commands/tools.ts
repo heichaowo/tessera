@@ -2,6 +2,7 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
+import { getNodes, getAgentEndpoint } from '../providers/nodes';
 
 /**
  * Execute tool on agent node(s)
@@ -11,23 +12,29 @@ async function executeOnAgent(
     target: string,
     nodeId: string
 ): Promise<string> {
-    const nodes = nodeId === 'all'
-        ? Object.keys(config.agentHosts || {})
+    const nodes = await getNodes();
+    const nodeIds = nodeId === 'all'
+        ? Array.from(nodes.keys())
         : [nodeId];
 
-    if (nodes.length === 0) {
-        // Fallback to local execution
+    if (nodeIds.length === 0) {
         return await runLocalCommand(command, target);
     }
 
     const results: string[] = [];
 
-    for (const node of nodes) {
-        const host = (config.agentHosts as Record<string, string>)?.[node];
-        if (!host) continue;
+    for (const id of nodeIds) {
+        const node = nodes.get(id);
+        if (!node) continue;
+
+        const endpoint = await getAgentEndpoint(id);
+        if (!endpoint) {
+            results.push(`❌ ${id}: No agent endpoint`);
+            continue;
+        }
 
         try {
-            const response = await fetch(`http://${host}:${config.agentPort || 8080}/${command}`, {
+            const response = await fetch(`${endpoint}/${command}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -37,14 +44,14 @@ async function executeOnAgent(
             });
 
             if (response.ok) {
-                const data = await response.json();
-                const nodeName = (config.nodeNames as Record<string, string>)?.[node] || node;
+                const data = await response.json() as { result?: string };
+                const nodeName = node.location || id;
                 results.push(`📍 *${nodeName}*\n\`\`\`\n${data.result || 'No output'}\n\`\`\``);
             } else {
-                results.push(`❌ ${node}: HTTP ${response.status}`);
+                results.push(`❌ ${id}: HTTP ${response.status}`);
             }
         } catch (error) {
-            results.push(`❌ ${node}: ${(error as Error).message.slice(0, 50)}`);
+            results.push(`❌ ${id}: ${(error as Error).message.slice(0, 50)}`);
         }
     }
 
@@ -82,22 +89,20 @@ async function runLocalCommand(command: string, target: string): Promise<string>
 }
 
 /**
- * Build node selection keyboard
+ * Build node selection keyboard (async - loads from API)
  */
-function buildNodeKeyboard(command: string, target: string, currentNode = 'all'): InlineKeyboard {
+async function buildNodeKeyboard(command: string, target: string, currentNode = 'all'): Promise<InlineKeyboard> {
     const keyboard = new InlineKeyboard();
+    const nodes = await getNodes();
 
     // All button
     const allLabel = currentNode === 'all' ? '✅ 全部' : '全部';
     keyboard.text(allLabel, `tool:${command}:${target}:all`);
 
     // Node buttons
-    const nodeNames = config.nodeNames as Record<string, string> || {};
-    const nodes = Object.keys(nodeNames);
-
     let count = 1;
-    for (const nodeId of nodes) {
-        const name = nodeNames[nodeId];
+    for (const [nodeId, node] of nodes) {
+        const name = node.location || nodeId;
         const label = currentNode === nodeId ? `✅ ${name}` : name;
         keyboard.text(label, `tool:${command}:${target}:${nodeId}`);
 
@@ -119,7 +124,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
         await ctx.answerCallbackQuery('Executing...');
 
         const result = await executeOnAgent(command, target, node);
-        const keyboard = buildNodeKeyboard(command, target, node);
+        const keyboard = await buildNodeKeyboard(command, target, node);
 
         await ctx.editMessageText(result.slice(0, 4000), {
             parse_mode: 'Markdown',
@@ -145,7 +150,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        const keyboard = buildNodeKeyboard('ping', target, node);
+        const keyboard = await buildNodeKeyboard('ping', target, node);
         const result = await executeOnAgent('ping', target, node);
 
         await ctx.reply(result.slice(0, 4000), {
@@ -168,7 +173,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
         }
 
         const targetWithPort = `${target}:${port}`;
-        const keyboard = buildNodeKeyboard('tcping', targetWithPort, 'all');
+        const keyboard = await buildNodeKeyboard('tcping', targetWithPort, 'all');
 
         await ctx.reply(`🔌 TCPing ${target}:${port}...`, {
             reply_markup: keyboard,
@@ -198,7 +203,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
 
         await ctx.reply(`🔍 Tracing route to ${target}...`);
 
-        const keyboard = buildNodeKeyboard('trace', target, node);
+        const keyboard = await buildNodeKeyboard('trace', target, node);
         const result = await executeOnAgent('trace', target, node);
 
         await ctx.reply(result.slice(0, 4000), {
@@ -220,7 +225,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        const keyboard = buildNodeKeyboard('route', target, node);
+        const keyboard = await buildNodeKeyboard('route', target, node);
         const result = await executeOnAgent('route', target, node);
 
         await ctx.reply(result.slice(0, 4000), {
@@ -242,7 +247,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        const keyboard = buildNodeKeyboard('path', target, node);
+        const keyboard = await buildNodeKeyboard('path', target, node);
         const result = await executeOnAgent('path', target, node);
 
         await ctx.reply(result.slice(0, 4000), {
