@@ -1,4 +1,4 @@
-# Production Docker Compose
+# Production Docker Compose with Traefik
 # Use with: docker compose -f docker-compose.prod.yml up -d
 
 services:
@@ -6,8 +6,6 @@ services:
     image: ghcr.io/${GITHUB_REPOSITORY:-moenet}/api:${VERSION:-latest}
     container_name: moenet-api
     restart: always
-    ports:
-      - "3000:3000"
     environment:
       - NODE_ENV=production
       - DB_HOST=postgres
@@ -19,8 +17,9 @@ services:
       - REDIS_PORT=6379
       - AGENT_API_KEY=${AGENT_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
-      - RESEND_API_KEY=${RESEND_API_KEY}
-      - EMAIL_FROM=${EMAIL_FROM:-noreply@moenet.work}
+      - MAILGUN_API_KEY=${MAILGUN_API_KEY}
+      - MAILGUN_DOMAIN=${MAILGUN_DOMAIN}
+      - MAILGUN_FROM=${MAILGUN_FROM}
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,8 +31,15 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.moenet-api.rule=Host(`api.moenet.work`)"
+      - "traefik.http.routers.moenet-api.entrypoints=websecure"
+      - "traefik.http.routers.moenet-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.moenet-api.loadbalancer.server.port=3000"
     networks:
       - moenet
+      - traefik
 
   bot:
     image: ghcr.io/${GITHUB_REPOSITORY:-moenet}/bot:${VERSION:-latest}
@@ -44,16 +50,29 @@ services:
       - API_URL=http://api:3000
       - API_TOKEN=${API_TOKEN}
       - TELEGRAM_ADMIN_USERNAME=${TELEGRAM_ADMIN_USERNAME}
+      - TELEGRAM_CONTACT=${TELEGRAM_CONTACT:-@heicha}
       - LOCAL_ASN=${LOCAL_ASN:-4242420998}
       - AGENT_HOSTS=${AGENT_HOSTS:-{}}
       - AGENT_PORT=${AGENT_PORT:-8080}
       - AGENT_TOKEN=${AGENT_TOKEN}
       - NODE_NAMES=${NODE_NAMES:-{}}
+      # Webhook mode (always enabled)
+      - WEBHOOK_ENABLED=true
+      - WEBHOOK_DOMAIN=${WEBHOOK_DOMAIN:-bot.moenet.work}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - WEBHOOK_PORT=8443
     depends_on:
       api:
         condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.moenet-bot.rule=Host(`bot.moenet.work`)"
+      - "traefik.http.routers.moenet-bot.entrypoints=websecure"
+      - "traefik.http.routers.moenet-bot.tls.certresolver=letsencrypt"
+      - "traefik.http.services.moenet-bot.loadbalancer.server.port=8443"
     networks:
       - moenet
+      - traefik
 
   postgres:
     image: postgres:16-alpine
@@ -96,3 +115,5 @@ volumes:
 networks:
   moenet:
     driver: bridge
+  traefik:
+    external: true
