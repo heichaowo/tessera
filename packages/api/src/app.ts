@@ -23,14 +23,20 @@ registerRoutes(app);
 
 // Initialize connections and start server
 async function main() {
+    const standalone = process.env.STANDALONE === 'true';
+
     try {
-        await initDatabase();
-        console.log('✅ Database connected');
+        if (!standalone) {
+            await initDatabase();
+            console.log('✅ Database connected');
 
-        await initRedis();
-        console.log('✅ Redis connected');
+            await initRedis();
+            console.log('✅ Redis connected');
+        } else {
+            console.log('⚠️  Running in STANDALONE mode (no DB/Redis)');
+        }
 
-        console.log(`🚀 Server running on port ${config.server.port}`);
+        console.log(`🚀 Server running on http://localhost:${config.server.port}`);
     } catch (error) {
         console.error('❌ Failed to start server:', error);
         process.exit(1);
@@ -43,3 +49,4 @@ export default {
     port: config.server.port,
     fetch: app.fetch,
 };
+

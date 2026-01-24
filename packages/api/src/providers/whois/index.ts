@@ -1,41 +1,64 @@
-import whois from 'whois';
-
 /**
  * WHOIS Provider for DN42 registry queries
  * 
- * Uses the 'whois' npm package to query DN42 registry
- * for ASN information including:
- * - pgp-fingerprint
- * - email/contact
- * - ssh keys
- * - admin-c/mnt-by references
+ * Native implementation using Bun TCP for WHOIS queries
+ * to avoid npm whois package ESM compatibility issues.
  */
 export class WhoisProvider {
-    private whoisOptions: whois.Options;
+    private server: string;
+    private port: number;
 
     constructor(server = 'whois.dn42', port = 43) {
-        this.whoisOptions = {
-            server: {
-                host: server,
-                port,
-            },
-        };
+        this.server = server;
+        this.port = port;
     }
 
     /**
      * Lookup a DN42 object (ASN, maintainer, person, etc.)
      */
     async lookup(query: string): Promise<string | null> {
-        return new Promise((resolve, reject) => {
-            whois.lookup(query, this.whoisOptions, (err: Error | null, data: string) => {
-                if (err) {
-                    console.error(`[WHOIS] Error looking up ${query}:`, err);
-                    reject(err);
-                    return;
-                }
-                resolve(data);
+        try {
+            const socket = await Bun.connect({
+                hostname: this.server,
+                port: this.port,
+                socket: {
+                    data(socket, data) {
+                        // Data is handled via accumulator below
+                    },
+                    close() { },
+                    error(socket, error) {
+                        console.error(`[WHOIS] Socket error:`, error);
+                    },
+                },
             });
-        });
+
+            // Send query
+            socket.write(`${query}\r\n`);
+
+            // Read response with timeout
+            const chunks: Uint8Array[] = [];
+            const decoder = new TextDecoder();
+
+            return new Promise((resolve) => {
+                const timeout = setTimeout(() => {
+                    socket.end();
+                    resolve(chunks.length > 0 ? decoder.decode(Buffer.concat(chunks)) : null);
+                }, 5000);
+
+                socket.data = (data) => {
+                    chunks.push(new Uint8Array(data));
+                };
+
+                socket.drain = () => {
+                    clearTimeout(timeout);
+                    socket.end();
+                    resolve(decoder.decode(Buffer.concat(chunks)));
+                };
+            });
+        } catch (error) {
+            console.error(`[WHOIS] Error looking up ${query}:`, error);
+            return null;
+        }
     }
 
     /**
