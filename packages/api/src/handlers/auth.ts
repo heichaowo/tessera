@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { sign, verify } from 'hono/jwt';
 import { makeResponse, ResponseCode, success } from '../common/response';
+import { getWhoisProvider } from '../providers/whois';
 import config from '../config';
 
 /**
@@ -61,13 +62,30 @@ async function query(c: Context, body: { asn?: string }): Promise<Response> {
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid ASN');
     }
 
-    // TODO: Query WHOIS for auth methods (pgp-fingerprint, email, ssh keys)
-    // For now, return mock data
-    const availableAuthMethods: AuthMethod[] = [
-        { id: 0, type: AuthType.PGP_CLEAR_SIGN, data: 'FINGERPRINT_PLACEHOLDER' },
-    ];
+    // Query WHOIS for auth methods
+    const whois = getWhoisProvider();
+    const authInfo = await whois.getAuthMethods(Number(asn));
 
-    const person = `AS${asn}`;
+    // Build available auth methods list
+    const availableAuthMethods: AuthMethod[] = [];
+    let id = 0;
+
+    // Add PGP fingerprints
+    for (const fp of authInfo.pgpFingerprints) {
+        availableAuthMethods.push({ id: id++, type: AuthType.PGP_CLEAR_SIGN, data: fp });
+    }
+
+    // Add emails
+    for (const email of authInfo.emails) {
+        availableAuthMethods.push({ id: id++, type: AuthType.EMAIL, data: email });
+    }
+
+    // Add SSH keys
+    for (const ssh of authInfo.sshKeys) {
+        availableAuthMethods.push({ id: id++, type: AuthType.SSH, data: ssh });
+    }
+
+    const person = authInfo.person || `AS${asn}`;
 
     // Sign the auth state
     const authState = await sign(
@@ -82,7 +100,7 @@ async function query(c: Context, body: { asn?: string }): Promise<Response> {
         availableAuthMethods: availableAuthMethods.map(m => ({
             id: m.id,
             type: m.type,
-            name: m.type === AuthType.PGP_CLEAR_SIGN ? 'PGP Signature' :
+            name: m.type === AuthType.PGP_CLEAR_SIGN ? `PGP: ${m.data?.substring(0, 16)}...` :
                 m.type === AuthType.EMAIL ? m.data :
                     m.type === AuthType.SSH ? 'SSH Key' : 'Password',
         })),
