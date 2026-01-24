@@ -1,0 +1,14 @@
+{
+    "name": "@moenet/bot",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "bun run --watch src/index.ts",
+        "start": "bun run src/index.ts",
+        "build": "bun build src/index.ts --outdir=dist --target=bun"
+    },
+    "dependencies": {
+        "grammy": "^1.21.0",
+        "@grammyjs/menu": "^1.2.0"
+    }
+}
