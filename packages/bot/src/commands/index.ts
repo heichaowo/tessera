@@ -7,6 +7,7 @@ import { registerToolsCommands } from './tools';
 import { registerAdminCommands } from './admin';
 import { registerStatsCommands } from './stats';
 import { registerCommunityCommands } from './community';
+import { registerBlockCommands } from './block';
 
 /**
  * Register all bot commands
@@ -19,4 +20,5 @@ export function registerCommands(bot: Bot<BotContext>) {
     registerAdminCommands(bot);
     registerStatsCommands(bot);
     registerCommunityCommands(bot);
+    registerBlockCommands(bot);
 }

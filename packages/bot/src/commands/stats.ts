@@ -2,70 +2,168 @@ import type { Bot } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
 
+interface ApiResponse {
+    code: number;
+    message: string;
+    data?: {
+        stats?: NetworkStats;
+        routers?: RouterStats[];
+        sessions?: SessionInfo[];
+    };
+}
+
+interface NetworkStats {
+    totalPeers: number;
+    activePeers: number;
+    pendingPeers: number;
+    totalNodes: number;
+    activeNodes: number;
+}
+
+interface RouterStats {
+    name: string;
+    location: string;
+    sessionCount: number;
+    isOpen: boolean;
+}
+
+interface SessionInfo {
+    asn: number;
+    router: string;
+    status: number;
+}
+
 /**
  * API client
  */
 async function apiRequest(endpoint: string, method = 'POST', body?: unknown) {
     const response = await fetch(`${config.apiUrl}${endpoint}`, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiToken}`,
+        },
         body: body ? JSON.stringify(body) : undefined,
     });
-    return response.json();
+    return response.json() as Promise<ApiResponse>;
 }
 
 export function registerStatsCommands(bot: Bot<BotContext>) {
     /**
-     * /stats [asn] - Show DN42 user stats
+     * /stats - Show MoeNet network stats
      */
     bot.command('stats', async (ctx) => {
-        const query = ctx.match?.trim().replace(/^AS/i, '') || ctx.session.asn?.toString();
+        try {
+            // Get network statistics from API
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'getStats',
+            });
 
-        if (!query || !/^\d+$/.test(query)) {
-            await ctx.reply('用法: /stats [ASN]\n例如: /stats 4242420998');
-            return;
+            if (result.code !== 0 || !result.data?.stats) {
+                // Fallback to enumRouters
+                const routerResult = await apiRequest('/admin', 'POST', {
+                    action: 'enumRouters',
+                });
+
+                const routers = routerResult.data?.routers || [];
+                const totalPeers = routers.reduce((sum: number, r: RouterStats) => sum + r.sessionCount, 0);
+                const activeNodes = routers.filter((r: RouterStats) => r.isOpen).length;
+
+                await ctx.reply(
+                    `📊 *MoeNet Statistics*\n\n` +
+                    `🖥️ Nodes: ${routers.length} (${activeNodes} open)\n` +
+                    `👥 Total Peers: ${totalPeers}\n\n` +
+                    `_Last updated: ${new Date().toISOString().slice(0, 19)}_`,
+                    { parse_mode: 'Markdown' }
+                );
+                return;
+            }
+
+            const stats = result.data.stats;
+            await ctx.reply(
+                `📊 *MoeNet Statistics*\n\n` +
+                `🖥️ Nodes: ${stats.totalNodes} (${stats.activeNodes} active)\n` +
+                `👥 Peers: ${stats.activePeers} active / ${stats.totalPeers} total\n` +
+                `⏳ Pending: ${stats.pendingPeers}\n\n` +
+                `_Last updated: ${new Date().toISOString().slice(0, 19)}_`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('[Stats] Error:', error);
+            await ctx.reply('❌ Failed to fetch statistics.');
         }
-
-        await ctx.reply(`📊 Loading stats for AS${query}...`);
-
-        // TODO: Fetch from explorer API
-        await ctx.reply(
-            `📊 *Stats for AS${query}*\n\n` +
-            `This feature will fetch data from DN42 explorer.\n` +
-            `此功能将从 DN42 explorer 获取数据。`,
-            { parse_mode: 'Markdown' }
-        );
     });
 
     /**
-     * /rank - Show DN42 global ranking
+     * /rank - Show node ranking by peer count
      */
     bot.command('rank', async (ctx) => {
-        await ctx.reply(
-            `🏆 *DN42 Global Ranking*\n\n` +
-            `This feature will show network rankings.\n` +
-            `此功能将显示网络排名。\n\n` +
-            `Visit: https://explorer.burble.com/`,
-            { parse_mode: 'Markdown' }
-        );
+        try {
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'enumRouters',
+            });
+
+            const routers = (result.data?.routers || [])
+                .sort((a: RouterStats, b: RouterStats) => b.sessionCount - a.sessionCount);
+
+            if (routers.length === 0) {
+                await ctx.reply('❌ No nodes found.');
+                return;
+            }
+
+            let message = `🏆 *Node Ranking*\n节点排行\n\n`;
+
+            routers.forEach((r: RouterStats, i: number) => {
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+                const status = r.isOpen ? '🟢' : '🔴';
+                message += `${medal} ${status} *${r.name}* - ${r.sessionCount} peers\n`;
+            });
+
+            await ctx.reply(message, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('[Rank] Error:', error);
+            await ctx.reply('❌ Failed to fetch rankings.');
+        }
     });
 
     /**
-     * /peerlist [asn] - Show peer list
+     * /peerlist - Show your peer list
      */
     bot.command('peerlist', async (ctx) => {
-        const query = ctx.match?.trim().replace(/^AS/i, '') || ctx.session.asn?.toString();
-
-        if (!query || !/^\d+$/.test(query)) {
-            await ctx.reply('用法: /peerlist [ASN]\n例如: /peerlist 4242420998');
+        if (!ctx.session.asn) {
+            await ctx.reply('❌ Please /login first.\n请先登录');
             return;
         }
 
-        await ctx.reply(
-            `👥 *Peer List for AS${query}*\n\n` +
-            `This feature will show peer connections.\n` +
-            `此功能将显示 Peer 连接情况。`,
-            { parse_mode: 'Markdown' }
-        );
+        try {
+            const result = await apiRequest('/session', 'POST', {
+                action: 'list',
+                asn: ctx.session.asn,
+            });
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Error: ${result.message}`);
+                return;
+            }
+
+            const sessions = result.data?.sessions || [];
+
+            if (sessions.length === 0) {
+                await ctx.reply('📋 You have no peers.\n你没有 Peer 连接');
+                return;
+            }
+
+            let message = `👥 *Your Peers (${sessions.length})*\n\n`;
+
+            sessions.forEach((s: SessionInfo, i: number) => {
+                const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '🔴';
+                message += `${i + 1}. ${statusIcon} ${s.router}\n`;
+            });
+
+            await ctx.reply(message, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('[Peerlist] Error:', error);
+            await ctx.reply('❌ Failed to fetch peer list.');
+        }
     });
 }
