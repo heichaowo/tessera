@@ -5,6 +5,7 @@ import { registerUserCommands } from './user';
 import { registerPeerCommands } from './peer';
 import { registerToolsCommands } from './tools';
 import { registerAdminCommands } from './admin';
+import { registerStatsCommands } from './stats';
 
 /**
  * Register all bot commands
@@ -15,4 +16,5 @@ export function registerCommands(bot: Bot<BotContext>) {
     registerPeerCommands(bot);
     registerToolsCommands(bot);
     registerAdminCommands(bot);
+    registerStatsCommands(bot);
 }
