@@ -1,0 +1,98 @@
+# Production Docker Compose
+# Use with: docker compose -f docker-compose.prod.yml up -d
+
+services:
+  api:
+    image: ghcr.io/${GITHUB_REPOSITORY:-moenet}/api:${VERSION:-latest}
+    container_name: moenet-api
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME:-moenet}
+      - DB_USER=${DB_USER:-moenet}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AGENT_API_KEY=${AGENT_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - EMAIL_FROM=${EMAIL_FROM:-noreply@moenet.work}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - moenet
+
+  bot:
+    image: ghcr.io/${GITHUB_REPOSITORY:-moenet}/bot:${VERSION:-latest}
+    container_name: moenet-bot
+    restart: always
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - API_URL=http://api:3000
+      - API_TOKEN=${API_TOKEN}
+      - TELEGRAM_ADMIN_USERNAME=${TELEGRAM_ADMIN_USERNAME}
+      - LOCAL_ASN=${LOCAL_ASN:-4242420998}
+      - AGENT_HOSTS=${AGENT_HOSTS:-{}}
+      - AGENT_PORT=${AGENT_PORT:-8080}
+      - AGENT_TOKEN=${AGENT_TOKEN}
+      - NODE_NAMES=${NODE_NAMES:-{}}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - moenet
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: moenet-postgres
+    restart: always
+    environment:
+      - POSTGRES_DB=${DB_NAME:-moenet}
+      - POSTGRES_USER=${DB_USER:-moenet}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-moenet}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - moenet
+
+  redis:
+    image: redis:7-alpine
+    container_name: moenet-redis
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - moenet
+
+volumes:
+  postgres_data:
+  redis_data:
+
+
+networks:
+  moenet:
+    driver: bridge
