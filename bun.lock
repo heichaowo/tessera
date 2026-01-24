@@ -33,6 +33,7 @@
       "dependencies": {
         "@grammyjs/menu": "^1.2.0",
         "grammy": "^1.21.0",
+        "hono": "^4.6.0",
       },
     },
   },

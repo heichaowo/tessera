@@ -20,6 +20,12 @@ export default {
     // Node display names
     nodeNames: JSON.parse(process.env.NODE_NAMES || '{}') as Record<string, string>,
 
-    // Network settings
-    dn42WhoisServer: process.env.DN42_WHOIS_SERVER || 'whois.dn42',
+    // Webhook settings
+    webhookEnabled: process.env.WEBHOOK_ENABLED === 'true',
+    webhookDomain: process.env.WEBHOOK_DOMAIN || '',
+    webhookSecret: process.env.WEBHOOK_SECRET || '',
+    webhookPort: Number(process.env.WEBHOOK_PORT) || 8443,
+
+    // Contact info
+    telegramContact: process.env.TELEGRAM_CONTACT || '@heicha',
 };
