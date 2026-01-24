@@ -1,9 +1,7 @@
 /**
- * Email Service Provider
+ * Email Service Provider - Mailgun
  * 
- * Supports multiple email backends:
- * - Resend API (recommended)
- * - SMTP (fallback)
+ * Uses existing Mailgun configuration from vault
  */
 
 interface EmailOptions {
@@ -20,16 +18,18 @@ interface EmailResult {
 }
 
 /**
- * Email Provider using Resend API
+ * Email Provider using Mailgun API
  */
 export class EmailProvider {
     private apiKey: string;
+    private domain: string;
     private fromAddress: string;
     private enabled: boolean;
 
     constructor() {
-        this.apiKey = process.env.RESEND_API_KEY || '';
-        this.fromAddress = process.env.EMAIL_FROM || 'noreply@moenet.work';
+        this.apiKey = process.env.MAILGUN_API_KEY || '';
+        this.domain = process.env.MAILGUN_DOMAIN || 'dn42.moenet.work';
+        this.fromAddress = process.env.MAILGUN_FROM || 'DN42 Bot <bot@dn42.moenet.work>';
         this.enabled = !!this.apiKey;
     }
 
@@ -38,33 +38,36 @@ export class EmailProvider {
     }
 
     /**
-     * Send email via Resend API
+     * Send email via Mailgun API
      */
     async send(options: EmailOptions): Promise<EmailResult> {
         if (!this.enabled) {
-            console.warn('[Email] Service disabled - no RESEND_API_KEY');
+            console.warn('[Email] Service disabled - no MAILGUN_API_KEY');
             return { success: false, error: 'Email service not configured' };
         }
 
         try {
-            const response = await fetch('https://api.resend.com/emails', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    from: this.fromAddress,
-                    to: options.to,
-                    subject: options.subject,
-                    text: options.text,
-                    html: options.html,
-                }),
-            });
+            const formData = new FormData();
+            formData.append('from', this.fromAddress);
+            formData.append('to', options.to);
+            formData.append('subject', options.subject);
+            if (options.text) formData.append('text', options.text);
+            if (options.html) formData.append('html', options.html);
+
+            const response = await fetch(
+                `https://api.mailgun.net/v3/${this.domain}/messages`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Basic ${btoa(`api:${this.apiKey}`)}`,
+                    },
+                    body: formData,
+                }
+            );
 
             if (!response.ok) {
                 const error = await response.text();
-                console.error('[Email] Resend API error:', error);
+                console.error('[Email] Mailgun API error:', error);
                 return { success: false, error: `API error: ${response.status}` };
             }
 
