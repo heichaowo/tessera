@@ -1,4 +1,5 @@
 import type { Bot } from 'grammy';
+import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
 
@@ -14,7 +15,7 @@ async function apiRequest(endpoint: string, method = 'POST', body?: unknown, tok
         },
         body: body ? JSON.stringify(body) : undefined,
     });
-    return response.json();
+    return response.json() as Promise<ApiResponse>;
 }
 
 /**
@@ -28,51 +29,26 @@ function isAdmin(ctx: BotContext): boolean {
 
 export function registerAdminCommands(bot: Bot<BotContext>) {
     /**
-     * /approve [uuid] - Approve pending peer
+     * /pending - List pending peers with approve/reject buttons
      */
-    bot.command('approve', async (ctx) => {
+    bot.command('pending', async (ctx) => {
         if (!isAdmin(ctx)) {
             await ctx.reply('❌ Admin access required.');
             return;
         }
 
-        const uuid = ctx.match?.trim();
+        await showPendingList(ctx);
+    });
 
-        if (!uuid) {
-            // List pending sessions
-            try {
-                const result = await apiRequest('/admin', 'POST', {
-                    action: 'enumSessions',
-                    status: 3, // PENDING_REVIEW
-                }, config.apiToken);
-
-                if (result.code !== 0) {
-                    await ctx.reply(`❌ Error: ${result.message}`);
-                    return;
-                }
-
-                const sessions = result.data?.sessions || [];
-
-                if (sessions.length === 0) {
-                    await ctx.reply('✅ No pending sessions.');
-                    return;
-                }
-
-                let message = '📋 *Pending Sessions:*\n\n';
-                sessions.forEach((s: { uuid: string; asn: number; router: string }) => {
-                    message += `• AS${s.asn} → ${s.router}\n  \`${s.uuid}\`\n`;
-                });
-                message += '\nUse `/approve <uuid>` to approve.';
-
-                await ctx.reply(message, { parse_mode: 'Markdown' });
-            } catch (error) {
-                console.error('[Approve] Error:', error);
-                await ctx.reply('❌ Failed to fetch pending sessions.');
-            }
+    // Handle approve button
+    bot.callbackQuery(/^approve:(.+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.answerCallbackQuery('❌ Admin only');
             return;
         }
 
-        // Approve specific session
+        const uuid = ctx.match[1];
+
         try {
             const result = await apiRequest('/admin', 'POST', {
                 action: 'approveSession',
@@ -80,15 +56,60 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             }, config.apiToken);
 
             if (result.code !== 0) {
-                await ctx.reply(`❌ Error: ${result.message}`);
+                await ctx.answerCallbackQuery(`❌ ${result.message}`);
                 return;
             }
 
-            await ctx.reply(`✅ Session approved: \`${uuid}\``, { parse_mode: 'Markdown' });
+            await ctx.answerCallbackQuery('✅ Approved!');
+
+            // Refresh the list
+            await showPendingList(ctx, ctx.callbackQuery.message?.message_id);
         } catch (error) {
             console.error('[Approve] Error:', error);
-            await ctx.reply('❌ Failed to approve session.');
+            await ctx.answerCallbackQuery('❌ Failed');
         }
+    });
+
+    // Handle reject button
+    bot.callbackQuery(/^reject:(.+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.answerCallbackQuery('❌ Admin only');
+            return;
+        }
+
+        const uuid = ctx.match[1];
+
+        try {
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'rejectSession',
+                uuid,
+                reason: 'Rejected by admin',
+            }, config.apiToken);
+
+            if (result.code !== 0) {
+                await ctx.answerCallbackQuery(`❌ ${result.message}`);
+                return;
+            }
+
+            await ctx.answerCallbackQuery('✅ Rejected!');
+
+            // Refresh the list
+            await showPendingList(ctx, ctx.callbackQuery.message?.message_id);
+        } catch (error) {
+            console.error('[Reject] Error:', error);
+            await ctx.answerCallbackQuery('❌ Failed');
+        }
+    });
+
+    // Handle refresh button
+    bot.callbackQuery('pending:refresh', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.answerCallbackQuery('❌ Admin only');
+            return;
+        }
+
+        await ctx.answerCallbackQuery('Refreshing...');
+        await showPendingList(ctx, ctx.callbackQuery.message?.message_id);
     });
 
     /**
@@ -113,7 +134,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             }
 
             let message = '🌐 *MoeNet Nodes:*\n\n';
-            routers.forEach((r: { name: string; location: string; sessionCount: number; isOpen: boolean }) => {
+            routers.forEach((r: RouterInfo) => {
                 const status = r.isOpen ? '🟢' : '🔴';
                 message += `${status} *${r.name}*\n   📍 ${r.location}\n   👥 ${r.sessionCount} peers\n\n`;
             });
@@ -124,88 +145,79 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             await ctx.reply('❌ Failed to fetch nodes.');
         }
     });
+}
 
-    /**
-     * /reject [uuid] [reason] - Reject pending peer
-     */
-    bot.command('reject', async (ctx) => {
-        if (!isAdmin(ctx)) {
-            await ctx.reply('❌ Admin access required.');
+/**
+ * Show pending sessions list with inline buttons
+ */
+async function showPendingList(ctx: BotContext, editMessageId?: number) {
+    try {
+        const result = await apiRequest('/admin', 'POST', {
+            action: 'enumSessions',
+            status: 3, // PENDING_REVIEW
+        }, config.apiToken);
+
+        if (result.code !== 0) {
+            const msg = `❌ Error: ${result.message}`;
+            if (editMessageId) {
+                await ctx.api.editMessageText(ctx.chat!.id, editMessageId, msg);
+            } else {
+                await ctx.reply(msg);
+            }
             return;
         }
 
-        const args = ctx.match?.trim().split(/\s+/) || [];
-        const uuid = args[0];
-        const reason = args.slice(1).join(' ') || 'Rejected by admin';
+        const sessions = result.data?.sessions || [];
 
-        if (!uuid) {
-            await ctx.reply('Usage: /reject <uuid> [reason]');
+        if (sessions.length === 0) {
+            const msg = '✅ No pending requests.\n没有待审批的请求。';
+            if (editMessageId) {
+                await ctx.api.editMessageText(ctx.chat!.id, editMessageId, msg);
+            } else {
+                await ctx.reply(msg);
+            }
             return;
         }
 
-        try {
-            const result = await apiRequest('/admin', 'POST', {
-                action: 'rejectSession',
-                uuid,
-                reason,
-            }, config.apiToken);
+        let message = `📋 *Pending (${sessions.length})*\n待审批请求\n\n`;
 
-            if (result.code !== 0) {
-                await ctx.reply(`❌ Error: ${result.message}`);
-                return;
-            }
+        const keyboard = new InlineKeyboard();
 
-            await ctx.reply(`✅ Session rejected: \`${uuid}\``, { parse_mode: 'Markdown' });
-        } catch (error) {
-            console.error('[Reject] Error:', error);
-            await ctx.reply('❌ Failed to reject session.');
-        }
-    });
+        sessions.forEach((s: SessionInfo, i: number) => {
+            const endpoint = s.ipv4EndpointAddress || s.ipv6EndpointAddress || 'N/A';
+            const shortId = s.uuid.slice(0, 8);
 
-    /**
-     * /pending - List all pending peer requests
-     */
-    bot.command('pending', async (ctx) => {
-        if (!isAdmin(ctx)) {
-            await ctx.reply('❌ Admin access required.');
-            return;
-        }
+            message += `*${i + 1}. AS${s.asn}* → ${s.router}\n`;
+            message += `   Endpoint: \`${endpoint}\`\n`;
+            message += `   ID: \`${shortId}...\`\n\n`;
 
-        try {
-            const result = await apiRequest('/admin', 'POST', {
-                action: 'enumSessions',
-                status: 3, // PENDING_REVIEW
-            }, config.apiToken) as ApiResponse;
+            // Add approve/reject buttons for each session
+            keyboard
+                .text(`✅ ${i + 1}`, `approve:${s.uuid}`)
+                .text(`❌ ${i + 1}`, `reject:${s.uuid}`)
+                .row();
+        });
 
-            if (result.code !== 0) {
-                await ctx.reply(`❌ Error: ${result.message}`);
-                return;
-            }
+        // Add refresh button
+        keyboard.text('🔄 Refresh', 'pending:refresh');
 
-            const sessions = result.data?.sessions || [];
-
-            if (sessions.length === 0) {
-                await ctx.reply('✅ No pending requests.\n没有待审批的请求。');
-                return;
-            }
-
-            let message = `📋 *Pending Requests (${sessions.length})*\n待审批请求\n\n`;
-
-            sessions.forEach((s: SessionInfo) => {
-                const endpoint = s.ipv4EndpointAddress || s.ipv6EndpointAddress || 'N/A';
-                message += `• *AS${s.asn}* → ${s.router}\n`;
-                message += `  Endpoint: \`${endpoint}\`\n`;
-                message += `  ID: \`${s.uuid.slice(0, 8)}...\`\n\n`;
+        if (editMessageId) {
+            await ctx.api.editMessageText(ctx.chat!.id, editMessageId, message, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard,
             });
-
-            message += '_Use /approve or /reject <uuid>_';
-
-            await ctx.reply(message, { parse_mode: 'Markdown' });
-        } catch (error) {
-            console.error('[Pending] Error:', error);
-            await ctx.reply('❌ Failed to fetch pending requests.');
+        } else {
+            await ctx.reply(message, { parse_mode: 'Markdown', reply_markup: keyboard });
         }
-    });
+    } catch (error) {
+        console.error('[Pending] Error:', error);
+        const msg = '❌ Failed to fetch pending requests.';
+        if (editMessageId) {
+            await ctx.api.editMessageText(ctx.chat!.id, editMessageId, msg);
+        } else {
+            await ctx.reply(msg);
+        }
+    }
 }
 
 // Type definitions
