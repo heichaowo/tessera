@@ -41,6 +41,15 @@ services:
       - WEBHOOK_DOMAIN=${WEBHOOK_DOMAIN}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
       - WEBHOOK_PORT=${WEBHOOK_PORT:-8443}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.moenet-bot.rule=Host(`bot.moenet.work`)"
+      - "traefik.http.routers.moenet-bot.entrypoints=websecure"
+      - "traefik.http.routers.moenet-bot.tls.certresolver=letsencrypt"
+      - "traefik.http.services.moenet-bot.loadbalancer.server.port=8443"
+    networks:
+      - default
+      - traefik
     depends_on:
       - api
 
@@ -72,3 +81,8 @@ services:
 
 volumes:
   postgres_data:
+
+
+networks:
+  traefik:
+    external: true
