@@ -329,7 +329,7 @@ async function handleConfig(
             persistentKeepaliveInterval: 25,
             dn42Ipv4: routerRecord.get('dn42Loopback4') as string ?? '',
             dn42Ipv6: routerRecord.get('dn42Loopback6') as string ?? '',
-            dn42Ipv6LinkLocal: 'fe80::1',
+            dn42Ipv6LinkLocal: `fe80::998:${routerRecord.get('nodeId') ?? 1}`,
         },
         metric: {
             pingTimeout: 5,
