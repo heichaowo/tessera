@@ -59,6 +59,7 @@ async function setBotCommands(bot: Bot<BotContext>) {
         { command: 'info', description: 'Peer status' },
         { command: 'stats', description: 'Network stats' },
         { command: 'rank', description: 'Node ranking' },
+        { command: 'main', description: 'Maintenance Control 维护控制' },
         { command: 'pending', description: 'Pending approvals' },
         { command: 'nodes', description: 'List nodes' },
         { command: 'block', description: 'Manage blocklist' },

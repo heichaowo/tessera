@@ -110,8 +110,8 @@ export function registerMaintenanceCommands(bot: Bot<BotContext>) {
             const icon = action === 'start' ? '🔧' : '✅';
             await ctx.editMessageText(
                 `${icon} *${node.name}*\n\n` +
-                `Maintenance mode: ${action === 'start' ? 'ON 🔴' : 'OFF 🟢'}\n\n` +
-                `${action === 'start' ? 'BGP sessions gracefully shutdown.' : 'Node back online.'}`,
+                `Maintenance mode / 维护模式: ${action === 'start' ? 'ON 🔴 开启' : 'OFF 🟢 关闭'}\n\n` +
+                `${action === 'start' ? 'BGP sessions gracefully shutdown.\nBGP 会话已优雅关闭。' : 'Node back online.\n节点已恢复上线。'}`,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: new InlineKeyboard()
@@ -282,8 +282,8 @@ async function showNodeStatus(ctx: BotContext, nodeId: string) {
     const peerCount = result.data?.peer_count as number | undefined;
 
     let message = isMaintenance
-        ? `🔴 *${node.name}* - Maintenance Mode\n\n`
-        : `🟢 *${node.name}* - Online\n\n`;
+        ? `🔴 *${node.name}* - Maintenance Mode 维护模式\n\n`
+        : `🟢 *${node.name}* - Online 在线\n\n`;
 
     message += `📍 Location: ${node.location || 'Unknown'}\n`;
     message += `🌐 IP: ${node.ipv4 || 'N/A'}\n`;
@@ -303,11 +303,11 @@ async function showNodeStatus(ctx: BotContext, nodeId: string) {
     const keyboard = new InlineKeyboard();
 
     if (isMaintenance) {
-        message += '⚠️ BGP sessions are gracefully shutdown.';
-        keyboard.text('✅ Exit Maintenance', `main:stop:${nodeId}`);
+        message += '⚠️ BGP sessions are gracefully shutdown.\n⚠️ BGP 会话已优雅关闭。';
+        keyboard.text('✅ Exit Maintenance 退出维护', `main:stop:${nodeId}`);
     } else {
-        message += '✅ Node is accepting traffic.';
-        keyboard.text('🔧 Enter Maintenance', `main:start:${nodeId}`);
+        message += '✅ Node is accepting traffic.\n✅ 节点正在接受流量。';
+        keyboard.text('🔧 Enter Maintenance 进入维护', `main:start:${nodeId}`);
     }
 
     keyboard.row();
