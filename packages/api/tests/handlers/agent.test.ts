@@ -167,3 +167,166 @@ describe('Agent Handler', () => {
         expect(res.status).toBe(404);
     });
 });
+
+describe('Agent Heartbeat Handler', () => {
+    test('should accept heartbeat with meshPublicKey', async () => {
+        const mockRoutersUpdate = mock(() => Promise.resolve([1]));
+        mock.module('../db/dbContext', () => ({
+            getModels: () => ({
+                routers: {
+                    findOne: mock(() => Promise.resolve({ get: () => 'test-router' })),
+                    update: mockRoutersUpdate,
+                },
+                bgpSessions: { findAll: mock(() => Promise.resolve([])) },
+                auditLogs: { create: mock(() => Promise.resolve()) },
+            }),
+        }));
+
+        const { default: agentHandler } = await import('../handlers/agent');
+        const app = new Hono();
+        app.post('/agent/heartbeat', agentHandler);
+
+        const res = await app.request('/agent/heartbeat', {
+            method: 'POST',
+            headers: {
+                Authorization: 'Bearer test-key',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                node_id: 'test-router',
+                agent_version: 'v2.1.0',
+                status: {
+                    version: 'v2.1.0',
+                    loadAvg: '0.50 0.40 0.30',
+                    uptime: 86400,
+                    meshPublicKey: 'test-public-key-12345',
+                },
+            }),
+        });
+
+        expect(res.status).toBe(200);
+    });
+
+    test('should reject heartbeat without node_id', async () => {
+        const { default: agentHandler } = await import('../handlers/agent');
+        const app = new Hono();
+        app.post('/agent/heartbeat', agentHandler);
+
+        const res = await app.request('/agent/heartbeat', {
+            method: 'POST',
+            headers: {
+                Authorization: 'Bearer test-key',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                status: { version: 'v2.1.0' },
+            }),
+        });
+
+        expect(res.status).toBe(422);
+    });
+});
+
+describe('Agent Config Handler', () => {
+    test('should return agent config for valid router', async () => {
+        mock.module('../db/dbContext', () => ({
+            getModels: () => ({
+                routers: {
+                    findOne: mock(() => Promise.resolve({
+                        get: (key: string) => {
+                            const data: Record<string, unknown> = {
+                                name: 'test-router',
+                                nodeId: 1,
+                                region: 'ap',
+                                location: 'Tokyo',
+                                provider: 'TestProvider',
+                                dn42Loopback4: '172.22.188.1',
+                                dn42Loopback6: 'fd00::1',
+                            };
+                            return data[key];
+                        },
+                    })),
+                },
+                bgpSessions: { findAll: mock(() => Promise.resolve([])) },
+                auditLogs: { create: mock(() => Promise.resolve()) },
+            }),
+        }));
+
+        const { default: agentHandler } = await import('../handlers/agent');
+        const app = new Hono();
+        app.get('/agent/:router/:action', agentHandler);
+
+        const res = await app.request('/agent/test-router/config', {
+            headers: { Authorization: 'Bearer valid-token' },
+        });
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.code).toBe(0);
+        expect(body.data.node).toBeDefined();
+        expect(body.data.node.name).toBe('test-router');
+        expect(body.data.wireguard).toBeDefined();
+    });
+});
+
+describe('Agent Mesh Handler', () => {
+    test('should return mesh peers list', async () => {
+        mock.module('../db/dbContext', () => ({
+            getModels: () => ({
+                routers: {
+                    findOne: mock(() => Promise.resolve({
+                        get: (key: string) => {
+                            if (key === 'name') return 'test-router';
+                            if (key === 'nodeId') return 1;
+                            return null;
+                        },
+                    })),
+                    findAll: mock(() => Promise.resolve([
+                        {
+                            get: (key: string) => {
+                                const data: Record<string, unknown> = {
+                                    name: 'peer-1',
+                                    nodeId: 2,
+                                    publicIp: '1.2.3.4',
+                                    meshPublicKey: 'peer1-pubkey',
+                                    region: 'ap',
+                                };
+                                return data[key];
+                            },
+                        },
+                        {
+                            get: (key: string) => {
+                                const data: Record<string, unknown> = {
+                                    name: 'peer-2',
+                                    nodeId: 3,
+                                    publicIp: '5.6.7.8',
+                                    meshPublicKey: 'peer2-pubkey',
+                                    region: 'us',
+                                };
+                                return data[key];
+                            },
+                        },
+                    ])),
+                },
+                bgpSessions: { findAll: mock(() => Promise.resolve([])) },
+                auditLogs: { create: mock(() => Promise.resolve()) },
+            }),
+        }));
+
+        const { default: agentHandler } = await import('../handlers/agent');
+        const app = new Hono();
+        app.get('/agent/:router/:action', agentHandler);
+
+        const res = await app.request('/agent/test-router/mesh', {
+            headers: { Authorization: 'Bearer valid-token' },
+        });
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.code).toBe(0);
+        expect(body.data.self).toBeDefined();
+        expect(body.data.peers).toBeDefined();
+        expect(Array.isArray(body.data.peers)).toBe(true);
+    });
+});
+
