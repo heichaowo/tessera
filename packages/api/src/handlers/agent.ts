@@ -218,13 +218,23 @@ async function handleGlobalHeartbeat(c: Context): Promise<Response> {
 
     const body = await c.req.json();
     const nodeId = body.node_id;
+    const status = body.status || {};
 
     if (!nodeId) {
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing node_id');
     }
 
-    // TODO: Update router last_seen timestamp
-    console.log(`[Agent ${nodeId}] Global Heartbeat:`, body);
+    // Update router mesh_public_key if provided
+    if (status.meshPublicKey) {
+        const models = getModels();
+        await models.routers.update(
+            { meshPublicKey: status.meshPublicKey },
+            { where: { name: nodeId } }
+        );
+        console.log(`[Agent ${nodeId}] Updated meshPublicKey: ${status.meshPublicKey.substring(0, 20)}...`);
+    }
+
+    console.log(`[Agent ${nodeId}] Heartbeat: load=${status.loadAvg}, uptime=${status.uptime}s`);
 
     return success(c, {
         received: true,
