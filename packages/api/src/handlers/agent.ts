@@ -75,6 +75,8 @@ export default async function agentHandler(c: Context): Promise<Response> {
             return await handleHeartbeat(c, routerUuid);
         case 'mesh':
             return await handleMesh(c, routerUuid);
+        case 'config':
+            return await handleConfig(c, routerRecord);
         default:
             return makeResponse(c, ResponseCode.NOT_FOUND, undefined, `Unknown action: ${action}`);
     }
@@ -208,4 +210,59 @@ async function handleMesh(c: Context, router: string): Promise<Response> {
     return success(c, {
         peers,
     });
+}
+
+/**
+ * GET /agent/:router/config
+ * Returns agent configuration for bootstrap mode
+ */
+async function handleConfig(
+    c: Context,
+    // biome-ignore lint/suspicious/noExplicitAny: Sequelize model instance
+    routerRecord: any
+): Promise<Response> {
+    const name = routerRecord.get('name') as string;
+    const region = routerRecord.get('region') as string;
+    const location = routerRecord.get('location') as string;
+
+    // Build agent configuration
+    const agentConfig = {
+        node: {
+            name,
+            id: routerRecord.get('id') as number ?? 0,
+            region,
+            location,
+            provider: '', // Could be stored in router config
+        },
+        bird: {
+            controlSocket: '/var/run/bird/run/bird.ctl',
+            poolSize: 5,
+            poolSizeMax: 64,
+            peerConfDir: '/etc/bird/peers',
+            ebgpConfTemplateFile: '/opt/moenet-agent/templates/ebgp.conf.tmpl',
+            ibgpConfDir: '/etc/bird/ibgp.d',
+        },
+        wireguard: {
+            privateKeyPath: '/etc/wireguard/privatekey',
+            publicKeyPath: '/etc/wireguard/publickey',
+            configDir: '/etc/wireguard',
+            persistentKeepaliveInterval: 25,
+            dn42Ipv4: routerRecord.get('dn42Loopback4') as string ?? '',
+            dn42Ipv6: routerRecord.get('dn42Loopback6') as string ?? '',
+            dn42Ipv6LinkLocal: 'fe80::1',
+        },
+        metric: {
+            pingTimeout: 5,
+            pingCount: 4,
+            pingWorkers: 32,
+        },
+        autoUpdate: {
+            enabled: true,
+            checkInterval: 60,
+            channel: 'stable',
+            githubRepo: 'heichaowo/moenet-agent',
+        },
+    };
+
+    return success(c, agentConfig);
 }
