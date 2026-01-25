@@ -2,6 +2,8 @@ import type { Context } from 'hono';
 import { verify } from 'hono/jwt';
 import { makeResponse, ResponseCode, success } from '../common/response';
 import { getModels } from '../db/dbContext';
+import { validateBody, isValidationError } from '../schemas/validate';
+import { PeeringRequestSchema, type CreateSessionInput, type GetSessionInput, type DeleteSessionInput } from '../schemas/peering';
 import config from '../config';
 import { PeeringStatus, SessionPolicy } from '../db/models/bgpSessions';
 import { generateUUID, getInterfaceName } from '../common/helpers';
@@ -21,8 +23,8 @@ interface JWTPayload {
  * - delete: Request session deletion
  */
 export default async function peeringHandler(c: Context): Promise<Response> {
-    const body = await c.req.json();
-    const action = body.action;
+    const parsed = await validateBody(c, PeeringRequestSchema);
+    if (isValidationError(parsed)) return parsed;
 
     // Verify JWT token
     const authHeader = c.req.header('Authorization');
@@ -41,17 +43,15 @@ export default async function peeringHandler(c: Context): Promise<Response> {
         return makeResponse(c, ResponseCode.UNAUTHORIZED, undefined, 'Invalid token');
     }
 
-    switch (action) {
+    switch (parsed.action) {
         case 'create':
-            return await createSession(c, body, user);
+            return await createSession(c, parsed as CreateSessionInput, user);
         case 'list':
             return await listSessions(c, user);
         case 'get':
-            return await getSession(c, body, user);
+            return await getSession(c, parsed as GetSessionInput, user);
         case 'delete':
-            return await deleteSession(c, body, user);
-        default:
-            return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
+            return await deleteSession(c, parsed as DeleteSessionInput, user);
     }
 }
 
@@ -71,14 +71,10 @@ interface CreateSessionRequest {
  */
 async function createSession(
     c: Context,
-    body: { data?: CreateSessionRequest },
+    input: CreateSessionInput,
     user: JWTPayload
 ): Promise<Response> {
-    const data = body.data;
-
-    if (!data?.router) {
-        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing router');
-    }
+    const data = input.data; // Already validated
 
     const models = getModels();
     const asn = Number(user.asn);
@@ -156,18 +152,16 @@ async function listSessions(c: Context, user: JWTPayload): Promise<Response> {
  */
 async function getSession(
     c: Context,
-    body: { uuid?: string },
+    input: GetSessionInput,
     user: JWTPayload
 ): Promise<Response> {
-    if (!body.uuid) {
-        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing uuid');
-    }
+    const { uuid } = input; // Already validated
 
     const models = getModels();
     const asn = Number(user.asn);
 
     const session = await models.bgpSessions.findOne({
-        where: { uuid: body.uuid, asn },
+        where: { uuid, asn },
     });
 
     if (!session) {
@@ -182,19 +176,17 @@ async function getSession(
  */
 async function deleteSession(
     c: Context,
-    body: { uuid?: string },
+    input: DeleteSessionInput,
     user: JWTPayload
 ): Promise<Response> {
-    if (!body.uuid) {
-        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing uuid');
-    }
+    const { uuid } = input; // Already validated
 
     const models = getModels();
     const asn = Number(user.asn);
 
     const [updated] = await models.bgpSessions.update(
         { status: PeeringStatus.QUEUED_FOR_DELETE },
-        { where: { uuid: body.uuid, asn } }
+        { where: { uuid, asn } }
     );
 
     if (!updated) {

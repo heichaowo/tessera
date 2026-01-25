@@ -3,6 +3,8 @@ import { Op } from 'sequelize';
 import { bcryptCompare } from '../common/helpers';
 import { makeResponse, ResponseCode, success } from '../common/response';
 import { getModels } from '../db/dbContext';
+import { validateBody, isValidationError } from '../schemas/validate';
+import { ModifySessionSchema, HeartbeatSchema, MetricsReportSchema } from '../schemas/agent';
 import config from '../config';
 import { PeeringStatus, type BgpSessionAttributes } from '../db/models/bgpSessions';
 
