@@ -58,7 +58,7 @@ async function setBotCommands(bot: Bot<BotContext>) {
         { command: 'peer', description: 'Create a peer 建立连接' },
         { command: 'modify', description: 'Modify peer 修改连接' },
         { command: 'remove', description: 'Remove peer 删除连接' },
-        { command: 'restart', description: 'Restart tunnel 重启隧道' },
+        { command: 'restart', description: 'Restart peer 重启连接' },
         { command: 'info', description: 'Peer status 连接状态' },
         { command: 'peerlist', description: 'Peer list 连接列表' },
         { command: 'stats', description: 'Network stats 网络统计' },
