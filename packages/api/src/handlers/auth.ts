@@ -2,6 +2,8 @@ import type { Context } from 'hono';
 import { sign, verify } from 'hono/jwt';
 import { makeResponse, ResponseCode, success } from '../common/response';
 import { getWhoisProvider } from '../providers/whois';
+import { validateBody, isValidationError } from '../schemas/validate';
+import { AuthRequestBodySchema, type AuthQueryInput, type AuthRequestInput, type AuthChallengeInput } from '../schemas/auth';
 import config from '../config';
 
 /**
@@ -37,34 +39,28 @@ interface AuthState {
  * 3. challenge - Verifies response and returns JWT token
  */
 export default async function authHandler(c: Context): Promise<Response> {
-    const body = await c.req.json();
-    const action = body.action;
+    const parsed = await validateBody(c, AuthRequestBodySchema);
+    if (isValidationError(parsed)) return parsed;
 
-    switch (action) {
+    switch (parsed.action) {
         case 'query':
-            return await query(c, body);
+            return await query(c, parsed as AuthQueryInput);
         case 'request':
-            return await request(c, body);
+            return await request(c, parsed as AuthRequestInput);
         case 'challenge':
-            return await challenge(c, body);
-        default:
-            return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
+            return await challenge(c, parsed as AuthChallengeInput);
     }
 }
 
 /**
  * Step 1: Query available auth methods for ASN
  */
-async function query(c: Context, body: { asn?: string }): Promise<Response> {
-    const asn = body.asn?.trim();
-
-    if (!asn || !/^\d+$/.test(asn)) {
-        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid ASN');
-    }
+async function query(c: Context, body: AuthQueryInput): Promise<Response> {
+    const asn = body.asn; // Already validated and transformed to number
 
     // Query WHOIS for auth methods
     const whois = getWhoisProvider();
-    const authInfo = await whois.getAuthMethods(Number(asn));
+    const authInfo = await whois.getAuthMethods(asn);
 
     // Build available auth methods list
     const availableAuthMethods: AuthMethod[] = [];
