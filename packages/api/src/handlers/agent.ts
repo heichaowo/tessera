@@ -309,10 +309,10 @@ async function handleConfig(
     const agentConfig = {
         node: {
             name,
-            id: routerRecord.get('id') as number ?? 0,
+            id: routerRecord.get('nodeId') as number ?? 0,
             region,
             location,
-            provider: '', // Could be stored in router config
+            provider: routerRecord.get('provider') as string ?? '',
         },
         bird: {
             controlSocket: '/var/run/bird/run/bird.ctl',

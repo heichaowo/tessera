@@ -9,6 +9,10 @@ export interface RouterAttributes {
     publicIpv6: string | null;
     wgPublicKey: string | null;
     meshPublicKey: string | null;
+    nodeId: number | null;
+    provider: string | null;
+    dn42Loopback4: string | null;
+    dn42Loopback6: string | null;
     isOpen: boolean;
     maxPeers: number;
     supportsIpv4: boolean;
@@ -57,6 +61,26 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
         },
         meshPublicKey: {
             field: 'mesh_public_key',
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        nodeId: {
+            field: 'node_id',
+            type: DataTypes.INTEGER,
+            allowNull: true,
+        },
+        provider: {
+            field: 'provider',
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        dn42Loopback4: {
+            field: 'dn42_loopback4',
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        dn42Loopback6: {
+            field: 'dn42_loopback6',
             type: DataTypes.STRING,
             allowNull: true,
         },
