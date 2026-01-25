@@ -54,7 +54,7 @@ services:
     restart: always
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - API_URL=http://api:3000
+      - API_URL=http://moenet-api:3000/api/v1
       - API_TOKEN=${API_TOKEN}
       - TELEGRAM_ADMIN_USERNAME=${TELEGRAM_ADMIN_USERNAME}
       - TELEGRAM_CONTACT=${TELEGRAM_CONTACT:-@heicha}

@@ -52,7 +52,7 @@ describe('API Response Format', () => {
         const res = await app.request('/error');
         const body = await res.json() as APIResponse;
 
-        expect(body.code).toBe(400);
+        expect(body.code).toBe(422);
         expect(body.message).toBe('Bad Request');
     });
 });
