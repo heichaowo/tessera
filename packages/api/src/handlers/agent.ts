@@ -241,7 +241,7 @@ async function handleMesh(c: Context, router: string): Promise<Response> {
 
     // Get all routers except the requesting one
     const routers = await models.routers.findAll({
-        attributes: ['uuid', 'name', 'publicIp', 'wgPublicKey', 'region'],
+        attributes: ['uuid', 'name', 'publicIp', 'meshPublicKey', 'region'],
         where: {
             uuid: { [Op.ne]: router },
         },
@@ -252,7 +252,7 @@ async function handleMesh(c: Context, router: string): Promise<Response> {
         nodeName: r.get('name') as string,
         loopbackIpv4: '',
         loopbackIpv6: '',
-        publicKey: r.get('wgPublicKey') as string || '',
+        publicKey: r.get('meshPublicKey') as string || '',
         endpoint: r.get('publicIp') ? `${r.get('publicIp')}:51820` : '',
         mtu: 1420,
         isRr: false,

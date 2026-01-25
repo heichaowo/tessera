@@ -8,6 +8,7 @@ export interface RouterAttributes {
     publicIp: string | null;
     publicIpv6: string | null;
     wgPublicKey: string | null;
+    meshPublicKey: string | null;
     isOpen: boolean;
     maxPeers: number;
     supportsIpv4: boolean;
@@ -51,6 +52,11 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
         },
         wgPublicKey: {
             field: 'wg_public_key',
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        meshPublicKey: {
+            field: 'mesh_public_key',
             type: DataTypes.STRING,
             allowNull: true,
         },
