@@ -30,6 +30,8 @@ chmod +x scripts/deploy.sh
 | `TELEGRAM_ADMIN_USERNAME` | ✅ | Admin username |
 | `AGENT_API_KEY` | ✅ | Agent authentication key |
 | `RESEND_API_KEY` | ❌ | Email service (optional) |
+| `AGENT_HOSTS` | ❌ | JSON map of node IDs to hostnames |
+| `NODE_NAMES` | ❌ | JSON map of node IDs to display names |
 
 ## Monitoring
 

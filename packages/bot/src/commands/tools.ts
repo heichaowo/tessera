@@ -81,10 +81,11 @@ async function runLocalCommand(command: string, target: string): Promise<string>
         const { stdout, stderr } = await execAsync(cmd, { timeout: 30000 });
         return stdout || stderr || 'No output';
     } catch (error) {
-        if ((error as NodeJS.ErrnoException).killed) {
+        const execError = error as Error & { killed?: boolean };
+        if (execError.killed) {
             return 'Command timed out';
         }
-        return `Error: ${(error as Error).message}`;
+        return `Error: ${execError.message}`;
     }
 }
 
@@ -117,9 +118,11 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
     // Handle node selection callbacks
     bot.callbackQuery(/^tool:(\w+):([^:]+):(\w+)$/, async (ctx) => {
         const match = ctx.match;
-        const command = match[1];
-        const target = match[2];
-        const node = match[3];
+        const command = match?.[1];
+        const target = match?.[2];
+        const node = match?.[3];
+
+        if (!command || !target || !node) return;
 
         await ctx.answerCallbackQuery('Executing...');
 

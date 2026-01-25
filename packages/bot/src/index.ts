@@ -14,6 +14,7 @@ interface SessionData {
         step: string;
         router?: string;
         endpoint?: string;
+        port?: string;
         publicKey?: string;
         ipv4?: string;
         ipv6?: string;

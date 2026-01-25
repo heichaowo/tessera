@@ -7,7 +7,7 @@
 
 import config from '../config';
 
-interface RouterInfo {
+export interface RouterInfo {
     uuid: string;
     name: string;
     location: string;
@@ -54,7 +54,18 @@ async function fetchNodes(): Promise<Map<string, RouterInfo>> {
 
         const nodes = new Map<string, RouterInfo>();
         for (const router of result.data.routers) {
-            nodes.set(router.name, router);
+            // Map API response fields to RouterInfo interface
+            const routerInfo: RouterInfo = {
+                uuid: router.uuid,
+                name: router.name,
+                location: router.location,
+                callbackUrl: router.callbackUrl,
+                ipv4: (router as unknown as { publicIp?: string }).publicIp,
+                ipv6: (router as unknown as { publicIpv6?: string }).publicIpv6,
+                isOpen: router.isOpen,
+                sessionCount: router.sessionCount,
+            };
+            nodes.set(router.name, routerInfo);
         }
 
         cachedNodes = nodes;

@@ -79,7 +79,11 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
         }
 
         const nodeId = nodes[0];
-        const nodeName = (config.nodeNames as Record<string, string>)?.[nodeId] || nodeId;
+        if (!nodeId) {
+            await ctx.reply('❌ No nodes configured for community stats.');
+            return;
+        }
+        const nodeName = config.nodeNames[nodeId] || nodeId;
 
         await ctx.reply(`📊 Fetching community stats from ${nodeName}...`);
 
@@ -127,7 +131,8 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
 
     // Handle node selection for community
     bot.callbackQuery(/^community:(.+)$/, async (ctx) => {
-        const nodeId = ctx.match[1];
+        const nodeId = ctx.match?.[1];
+        if (!nodeId) return;
         const nodeName = (config.nodeNames as Record<string, string>)?.[nodeId] || nodeId;
 
         await ctx.answerCallbackQuery('Loading...');
@@ -191,7 +196,9 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
 
     // Handle probe now button
     bot.callbackQuery(/^probe_now:(\d+)$/, async (ctx) => {
-        const asn = parseInt(ctx.match[1]);
+        const asnStr = ctx.match?.[1];
+        if (!asnStr) return;
+        const asn = parseInt(asnStr);
 
         await ctx.answerCallbackQuery('Starting probe...');
 
@@ -202,7 +209,13 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        const result = await callAgentApi(nodes[0], 'POST', `/communities/probe/now/${asn}`) as ProbeResult | null;
+        const firstNode = nodes[0];
+        if (!firstNode) {
+            await ctx.answerCallbackQuery('No nodes available');
+            return;
+        }
+
+        const result = await callAgentApi(firstNode, 'POST', `/communities/probe/now/${asn}`) as ProbeResult | null;
 
         if (result?.success) {
             await ctx.answerCallbackQuery(`✅ Probe: ${result.rtt_ms?.toFixed(1)}ms (Tier ${result.latency_tier})`);
@@ -214,7 +227,9 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
 
     // Handle latency selection
     bot.callbackQuery(/^latency:(\d+)$/, async (ctx) => {
-        const asn = parseInt(ctx.match[1]);
+        const asnStr = ctx.match?.[1];
+        if (!asnStr) return;
+        const asn = parseInt(asnStr);
         await ctx.answerCallbackQuery();
         await showLatencyStats(ctx, asn);
     });
@@ -227,7 +242,13 @@ async function showLatencyStats(ctx: BotContext, asn: number) {
         return;
     }
 
-    const stats = await callAgentApi(nodes[0], 'GET', `/communities/probe/peer/${asn}`) as ProbeStats | null;
+    const firstNode = nodes[0];
+    if (!firstNode) {
+        await ctx.reply('❌ No nodes configured.');
+        return;
+    }
+
+    const stats = await callAgentApi(firstNode, 'GET', `/communities/probe/peer/${asn}`) as ProbeStats | null;
 
     const keyboard = new InlineKeyboard()
         .text('🔄 立即探测 Probe Now', `probe_now:${asn}`);

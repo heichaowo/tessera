@@ -77,7 +77,9 @@ export function registerBlockCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        const asn = parseInt(ctx.match[1], 10);
+        const asnStr = ctx.match?.[1];
+        if (!asnStr) return;
+        const asn = parseInt(asnStr, 10);
 
         try {
             const result = await apiRequest('/admin', 'POST', {

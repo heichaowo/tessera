@@ -27,10 +27,10 @@ export class WhoisProvider {
                 return null;
             }
 
-            const data = await response.json();
+            const data = await response.json() as Record<string, unknown>;
             const key = `${objectType}/${objectKey}`;
 
-            return data[key] || null;
+            return (data[key] as RegistryObject) || null;
         } catch (error) {
             console.error(`[WHOIS] Error looking up ${query}:`, error);
             return null;

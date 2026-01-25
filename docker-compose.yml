@@ -1,34 +1,57 @@
+# MoeNet Core - Docker Compose
+# Production: docker compose up -d
+# Development: docker compose up -d --build
+
 services:
   api:
     build:
       context: .
       dockerfile: packages/api/Dockerfile
+    image: ghcr.io/${GITHUB_REPOSITORY:-moenet}/api:${VERSION:-latest}
     container_name: moenet-api
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
+    restart: always
     environment:
       - NODE_ENV=production
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_NAME=moenet
-      - DB_USER=moenet
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-moenet}
+      - DB_USER=${DB_USER:-moenet}
       - DB_PASSWORD=${DB_PASSWORD}
-      - REDIS_HOST=redis
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
       - AGENT_API_KEY=${AGENT_API_KEY}
       - JWT_SECRET=${JWT_SECRET}
+      - MAILGUN_API_KEY=${MAILGUN_API_KEY}
+      - MAILGUN_DOMAIN=${MAILGUN_DOMAIN}
+      - MAILGUN_FROM=${MAILGUN_FROM}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "--spider", "http://localhost:3000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.moenet-api.rule=Host(`api.moenet.work`)"
+      - "traefik.http.routers.moenet-api.entrypoints=websecure"
+      - "traefik.http.routers.moenet-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.moenet-api.loadbalancer.server.port=3000"
+    networks:
+      - default
+      - traefik
 
   bot:
     build:
       context: .
       dockerfile: packages/bot/Dockerfile
+    image: ghcr.io/${GITHUB_REPOSITORY:-moenet}/bot:${VERSION:-latest}
     container_name: moenet-bot
-    restart: unless-stopped
+    restart: always
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - API_URL=http://api:3000
@@ -41,6 +64,9 @@ services:
       - WEBHOOK_DOMAIN=${WEBHOOK_DOMAIN}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
       - WEBHOOK_PORT=${WEBHOOK_PORT:-8443}
+    depends_on:
+      api:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.moenet-bot.rule=Host(`bot.moenet.work`)"
@@ -50,37 +76,39 @@ services:
     networks:
       - default
       - traefik
-    depends_on:
-      - api
 
   postgres:
     image: postgres:16-alpine
     container_name: moenet-postgres
-    restart: unless-stopped
+    restart: always
     environment:
-      - POSTGRES_DB=moenet
-      - POSTGRES_USER=moenet
+      - POSTGRES_DB=${DB_NAME:-moenet}
+      - POSTGRES_USER=${DB_USER:-moenet}
       - POSTGRES_PASSWORD=${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U moenet" ]
-      interval: 5s
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-moenet}" ]
+      interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
     container_name: moenet-redis
-    restart: unless-stopped
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
 
 volumes:
   postgres_data:
+  redis_data:
 
 
 networks:

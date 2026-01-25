@@ -12,10 +12,20 @@ import path from 'path';
 
 const execAsync = promisify(exec);
 
+interface APIResponse {
+    code: number;
+    message?: string;
+    data?: {
+        person?: string;
+        availableAuthMethods?: Array<{ type: number }>;
+        [key: string]: unknown;
+    };
+}
+
 /**
  * API client for moenet-core
  */
-async function apiRequest(endpoint: string, method = 'POST', body?: unknown) {
+async function apiRequest(endpoint: string, method = 'POST', body?: unknown): Promise<APIResponse> {
     const response = await fetch(`${config.apiUrl}${endpoint}`, {
         method,
         headers: {
@@ -23,7 +33,7 @@ async function apiRequest(endpoint: string, method = 'POST', body?: unknown) {
         },
         body: body ? JSON.stringify(body) : undefined,
     });
-    return response.json();
+    return response.json() as Promise<APIResponse>;
 }
 
 // Store for verification challenges
@@ -57,7 +67,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
         // Check if it looks like an ASN
         const asnMatch = text.match(/^(?:AS)?(\d+)$/i);
-        if (!asnMatch) {
+        if (!asnMatch?.[1]) {
             return next();
         }
 
@@ -76,11 +86,12 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             });
 
             if (result.code !== 0) {
-                await ctx.reply(`❌ Error: ${result.message}`);
+                await ctx.reply(`❌ Error: ${result.message ?? 'Unknown error'}`);
                 return;
             }
 
-            const { person, availableAuthMethods } = result.data;
+            const person = result.data?.person;
+            const availableAuthMethods = result.data?.availableAuthMethods;
 
             if (!availableAuthMethods || availableAuthMethods.length === 0) {
                 await ctx.reply(
@@ -125,7 +136,9 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
     // Handle GPG login
     bot.callbackQuery(/^login:gpg:(\d+)$/, async (ctx) => {
-        const asn = parseInt(ctx.match[1]);
+        const asnStr = ctx.match?.[1];
+        if (!asnStr) return;
+        const asn = parseInt(asnStr);
         const userId = ctx.from.id;
 
         // Generate challenge
@@ -151,7 +164,9 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
     // Handle Email login
     bot.callbackQuery(/^login:email:(\d+)$/, async (ctx) => {
-        const asn = parseInt(ctx.match[1]);
+        const asnStr = ctx.match?.[1];
+        if (!asnStr) return;
+        const asn = parseInt(asnStr);
         const userId = ctx.from.id;
 
         // Generate 6-digit code
@@ -175,7 +190,9 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
     // Handle SSH login
     bot.callbackQuery(/^login:ssh:(\d+)$/, async (ctx) => {
-        const asn = parseInt(ctx.match[1]);
+        const asnStr = ctx.match?.[1];
+        if (!asnStr) return;
+        const asn = parseInt(asnStr);
         const userId = ctx.from.id;
 
         // Generate challenge

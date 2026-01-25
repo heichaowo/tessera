@@ -12,14 +12,25 @@ interface JWTPayload {
 
 /**
  * Check if user is an admin
+ * Accepts either:
+ * 1. API_TOKEN (for bot/internal use)
+ * 2. JWT from user with isAdmin flag in database
  */
 async function isAdmin(c: Context): Promise<boolean> {
     const authHeader = c.req.header('Authorization');
     if (!authHeader?.startsWith('Bearer ')) return false;
 
+    const token = authHeader.substring(7);
+
+    // Check if it's the API token (for bot/agent)
+    if (token === config.auth.agentApiKey) {
+        return true;
+    }
+
+    // Otherwise verify as JWT
     try {
         const payload = await verify(
-            authHeader.substring(7),
+            token,
             config.auth.jwtSecret,
             'HS256'
         ) as unknown as JWTPayload;
@@ -117,7 +128,8 @@ async function setRouter(c: Context, body: { type: string; router?: string; data
                 where: { uuid: router },
             });
         } else if (type === 'add') {
-            await models.routers.create(routerData);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await models.routers.create(routerData as any);
         } else {
             return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid type');
         }

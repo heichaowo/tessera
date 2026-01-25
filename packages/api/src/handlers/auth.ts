@@ -120,7 +120,7 @@ async function request(c: Context, body: { authState?: string; authMethod?: numb
     // Verify and decode auth state
     let state: AuthState;
     try {
-        state = await verify(stateToken, config.auth.jwtSecret, 'HS256') as AuthState;
+        state = await verify(stateToken, config.auth.jwtSecret, 'HS256') as unknown as AuthState;
     } catch {
         return makeResponse(c, ResponseCode.UNAUTHORIZED, undefined, 'Invalid auth state');
     }
@@ -174,7 +174,7 @@ async function challenge(c: Context, body: { authState?: string; data?: unknown 
     // Verify and decode auth state
     let state: AuthState & { code: string; authMethod: AuthMethod };
     try {
-        state = await verify(stateToken, config.auth.jwtSecret, 'HS256') as typeof state;
+        state = await verify(stateToken, config.auth.jwtSecret, 'HS256') as unknown as typeof state;
     } catch {
         return makeResponse(c, ResponseCode.UNAUTHORIZED, undefined, 'Invalid auth state');
     }

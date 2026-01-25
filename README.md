@@ -48,6 +48,11 @@ Required:
 - `DB_PASSWORD` - PostgreSQL password
 - `JWT_SECRET` - Secret for JWT tokens
 
+Bot Agent Configuration (optional):
+
+- `AGENT_HOSTS` - JSON map of node IDs to hostnames
+- `NODE_NAMES` - JSON map of node IDs to display names
+
 ## Bot Commands
 
 | Category | Commands |
@@ -55,15 +60,30 @@ Required:
 | User | /login, /logout, /whoami |
 | Peer | /peer, /info, /modify, /remove, /restart |
 | Tools | /ping, /tcping, /trace, /route, /path, /whois, /dig, /findnoc |
-| Admin | /approve, /reject, /nodes |
+| Admin | /approve, /reject, /block, /nodes |
 | Stats | /stats, /rank, /peerlist, /community, /latency |
 
 ## API Endpoints
 
-- `POST /agent` - Agent API (sessions, modify, report, heartbeat)
-- `POST /auth` - Authentication (query, request, challenge)
-- `POST /session` - Peering management
-- `POST /admin` - Admin operations
+### Agent API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/agent/:router/sessions` | GET | Get BGP sessions |
+| `/agent/:router/modify` | POST | Modify session |
+| `/agent/:router/report` | POST | Report metrics |
+| `/agent/:router/heartbeat` | POST | Agent heartbeat |
+| `/agent/:router/mesh` | GET | Get mesh peers |
+
+### Public API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/auth` | POST | Authentication (query, request, challenge) |
+| `/session` | POST | Peering management |
+| `/admin` | POST | Admin operations |
+| `/health` | GET | Health check |
+| `/metrics` | GET | Prometheus metrics |
 
 ## License
 

@@ -4,10 +4,19 @@ import type { BotContext } from '../index';
 import config from '../config';
 import * as i18n from '../i18n/messages';
 
+interface APIResponse {
+    code: number;
+    message?: string;
+    data?: {
+        routers?: Array<{ uuid: string; name: string; isOpen: boolean; location?: string }>;
+        [key: string]: unknown;
+    };
+}
+
 /**
  * API client for moenet-core
  */
-async function apiRequest(endpoint: string, method = 'POST', body?: unknown, token?: string) {
+async function apiRequest(endpoint: string, method = 'POST', body?: unknown, token?: string): Promise<APIResponse> {
     const response = await fetch(`${config.apiUrl}${endpoint}`, {
         method,
         headers: {
@@ -16,7 +25,7 @@ async function apiRequest(endpoint: string, method = 'POST', body?: unknown, tok
         },
         body: body ? JSON.stringify(body) : undefined,
     });
-    return response.json();
+    return response.json() as Promise<APIResponse>;
 }
 
 export function registerPeerCommands(bot: Bot<BotContext>) {
@@ -55,8 +64,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
             // Build inline keyboard for node selection
             const keyboard = new InlineKeyboard();
-            routers.forEach((r: { name: string; location: string; uuid: string }, i: number) => {
-                keyboard.text(`${r.name} - ${r.location}`, `peer:node:${r.uuid}`);
+            routers.forEach((r: { name: string; location?: string; uuid: string }, i: number) => {
+                keyboard.text(`${r.name} - ${r.location ?? 'Unknown'}`, `peer:node:${r.uuid}`);
                 if ((i + 1) % 2 === 0) keyboard.row();
             });
 

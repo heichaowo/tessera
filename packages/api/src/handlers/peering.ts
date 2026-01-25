@@ -36,7 +36,7 @@ export default async function peeringHandler(c: Context): Promise<Response> {
             authHeader.substring(7),
             config.auth.jwtSecret,
             'HS256'
-        ) as JWTPayload;
+        ) as unknown as JWTPayload;
     } catch {
         return makeResponse(c, ResponseCode.UNAUTHORIZED, undefined, 'Invalid token');
     }
@@ -147,7 +147,7 @@ async function listSessions(c: Context, user: JWTPayload): Promise<Response> {
     });
 
     return success(c, {
-        sessions: sessions.map(s => s.get()),
+        sessions: sessions.map((s: { get: () => unknown }) => s.get()),
     });
 }
 
