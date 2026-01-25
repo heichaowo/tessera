@@ -72,8 +72,9 @@ Bot Agent Configuration (optional):
 | `/agent/:router/sessions` | GET | Get BGP sessions |
 | `/agent/:router/modify` | POST | Modify session |
 | `/agent/:router/report` | POST | Report metrics |
-| `/agent/:router/heartbeat` | POST | Agent heartbeat |
+| `/agent/:router/heartbeat` | POST | Agent heartbeat (with meshPublicKey) |
 | `/agent/:router/mesh` | GET | Get mesh peers |
+| `/agent/:router/config` | GET | Get full agent config (Bootstrap mode) |
 
 ### Public API
 
@@ -99,6 +100,22 @@ Redis-based sliding window rate limiting per route:
 | Default | 60/min |
 
 Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+
+### Bootstrap Mode
+
+Agents can fetch their full configuration from the Control Plane using the `/config` endpoint:
+
+```json
+{
+  "bootstrap": {
+    "controlPlaneUrl": "https://api.moenet.work",
+    "nodeName": "jp-edge",
+    "token": "your-token"
+  }
+}
+```
+
+The agent fetches `nodeId`, `region`, `loopback IPs`, and other settings from the database.
 
 ### Input Validation
 
