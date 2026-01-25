@@ -127,40 +127,80 @@ export function registerStatsCommands(bot: Bot<BotContext>) {
     });
 
     /**
-     * /peerlist - Show your peer list
+     * /peerlist - Show peer list (admin: all peers, user: own peers)
      */
     bot.command('peerlist', async (ctx) => {
-        if (!ctx.session.asn) {
-            await ctx.reply('❌ Please /login first.\n请先登录');
-            return;
-        }
+        // Check if admin
+        const username = ctx.from?.username?.toLowerCase();
+        const adminUsername = config.adminUsername?.toLowerCase().replace('@', '');
+        const isAdmin = username === adminUsername || ctx.session.isAdmin === true;
 
         try {
-            const result = await apiRequest('/session', 'POST', {
-                action: 'list',
-                asn: ctx.session.asn,
-            });
+            if (isAdmin) {
+                // Admin view: show all peers
+                const result = await apiRequest('/admin', 'POST', {
+                    action: 'enumSessions',
+                });
 
-            if (result.code !== 0) {
-                await ctx.reply(`❌ Error: ${result.message}`);
-                return;
+                if (result.code !== 0) {
+                    await ctx.reply(`❌ Error: ${result.message}`);
+                    return;
+                }
+
+                const sessions = (result.data?.sessions || []).slice(0, 30) as Array<{
+                    asn: number;
+                    router: string;
+                    status: number;
+                }>;
+
+                if (sessions.length === 0) {
+                    await ctx.reply('📋 No peers in system.\n系统中没有 Peer');
+                    return;
+                }
+
+                let message = `📋 *All Peers (Admin View)*\n所有 Peer（管理员视图）\n\n`;
+
+                sessions.forEach((s, i: number) => {
+                    const statusIcon = s.status === 1 ? '✅' : s.status === 3 ? '⏳' : '❌';
+                    message += `${statusIcon} \`AS${s.asn}\` @ ${s.router}\n`;
+                });
+
+                message += `\n_共 ${sessions.length} 个 Peer_`;
+
+                await ctx.reply(message, { parse_mode: 'Markdown' });
+            } else {
+                // User view: show own peers
+                if (!ctx.session.asn) {
+                    await ctx.reply('❌ Please /login first.\n请先登录');
+                    return;
+                }
+
+                const result = await apiRequest('/session', 'POST', {
+                    action: 'list',
+                    asn: ctx.session.asn,
+                });
+
+                if (result.code !== 0) {
+                    await ctx.reply(`❌ Error: ${result.message}`);
+                    return;
+                }
+
+                const sessions = result.data?.sessions || [];
+
+                if (sessions.length === 0) {
+                    await ctx.reply('📋 You have no peers.\n你没有 Peer 连接');
+                    return;
+                }
+
+                let message = `👥 *Your Peers (${sessions.length})*\n\n`;
+
+                sessions.forEach((s: SessionInfo, i: number) => {
+                    const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '🔴';
+                    message += `${i + 1}. ${statusIcon} ${s.router}\n`;
+                });
+
+                await ctx.reply(message, { parse_mode: 'Markdown' });
             }
-
-            const sessions = result.data?.sessions || [];
-
-            if (sessions.length === 0) {
-                await ctx.reply('📋 You have no peers.\n你没有 Peer 连接');
-                return;
-            }
-
-            let message = `👥 *Your Peers (${sessions.length})*\n\n`;
-
-            sessions.forEach((s: SessionInfo, i: number) => {
-                const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '🔴';
-                message += `${i + 1}. ${statusIcon} ${s.router}\n`;
-            });
-
-            await ctx.reply(message, { parse_mode: 'Markdown' });
         } catch (error) {
             console.error('[Peerlist] Error:', error);
             await ctx.reply('❌ Failed to fetch peer list.');

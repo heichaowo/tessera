@@ -145,6 +145,88 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             await ctx.reply('❌ Failed to fetch nodes.');
         }
     });
+
+    /**
+     * /addpeer - Admin command to directly add peer (bypasses approval)
+     * Usage: /addpeer <ASN> <node> <endpoint:port> <pubkey> <ipv6>
+     */
+    bot.command('addpeer', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.reply('❌ Admin access required.');
+            return;
+        }
+
+        const args = ctx.match?.trim().split(/\s+/) || [];
+
+        if (args.length < 5) {
+            await ctx.reply(
+                `🔧 *Admin Add Peer 管理员添加 Peer*\n\n` +
+                `Usage 用法:\n` +
+                `\`/addpeer <ASN> <node> <endpoint:port> <pubkey> <ipv6>\`\n\n` +
+                `Example 示例:\n` +
+                `\`/addpeer 4242420998 hk-edge tunnel.example.com:51820 PUBKEY_BASE64 fd00::1\`\n\n` +
+                `Note: Peer will be created with ACTIVE status (no approval needed)\n` +
+                `注意: Peer 将以 ACTIVE 状态创建（无需审批）`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        const asnStr = args[0] || '';
+        const node = args[1] || '';
+        const endpointPort = args[2] || '';
+        const pubkey = args[3] || '';
+        const ipv6 = args[4] || '';
+        const asn = parseInt(asnStr.replace(/^AS/i, ''), 10);
+        const [endpoint, port] = endpointPort.split(':');
+
+        if (isNaN(asn)) {
+            await ctx.reply('❌ Invalid ASN format');
+            return;
+        }
+
+        if (!pubkey || pubkey.length !== 44) {
+            await ctx.reply('❌ Invalid WireGuard public key (should be 44 chars base64)');
+            return;
+        }
+
+        await ctx.reply(
+            `⏳ Creating peer...\n正在创建 Peer...\n\n` +
+            `ASN: \`AS${asn}\`\n` +
+            `Node: \`${node}\`\n` +
+            `Endpoint: \`${endpoint}:${port}\``,
+            { parse_mode: 'Markdown' }
+        );
+
+        try {
+            const result = await apiRequest('/session', 'POST', {
+                action: 'adminCreate',
+                asn,
+                router: node,
+                endpoint,
+                port: parseInt(port || '51820', 10),
+                publicKey: pubkey,
+                ipv6,
+                status: 1, // ACTIVE
+            }, config.apiToken);
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Error: ${result.message}`);
+                return;
+            }
+
+            await ctx.reply(
+                `✅ *Peer Created 已创建*\n\n` +
+                `ASN: \`AS${asn}\`\n` +
+                `Node: \`${node}\`\n` +
+                `Status: \`ACTIVE\` (免审核)`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('[AddPeer] Error:', error);
+            await ctx.reply(`❌ Failed to create peer: ${(error as Error).message}`);
+        }
+    });
 }
 
 /**
