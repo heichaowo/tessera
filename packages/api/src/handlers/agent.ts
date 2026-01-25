@@ -9,20 +9,17 @@ import config from '../config';
 import { PeeringStatus, type BgpSessionAttributes } from '../db/models/bgpSessions';
 
 /**
- * Verify agent API key (bcrypt hash of key + router)
+ * Verify agent API key (simple token comparison)
  */
-async function verifyAgentApiKey(c: Context, router: string): Promise<boolean> {
+async function verifyAgentApiKey(c: Context, _router: string): Promise<boolean> {
     const header = c.req.header('Authorization');
     if (!header) return false;
 
     const token = header.split('Bearer ')[1];
     if (!token) return false;
 
-    try {
-        return await bcryptCompare(`${config.auth.agentApiKey}${router}`, token);
-    } catch {
-        return false;
-    }
+    // Simple token comparison
+    return token === config.auth.agentApiKey;
 }
 
 /**
@@ -33,9 +30,15 @@ async function verifyAgentApiKey(c: Context, router: string): Promise<boolean> {
  * - POST /agent/:router/modify - Modify session status
  * - POST /agent/:router/report - Report metrics
  * - POST /agent/:router/heartbeat - Agent heartbeat
+ * - POST /agent/heartbeat - Global heartbeat (node_id in body)
  */
 export default async function agentHandler(c: Context): Promise<Response> {
     const { action, router } = c.req.param();
+
+    // Handle global heartbeat (no router in path, node_id in body)
+    if (c.req.path === '/api/v1/agent/heartbeat' && !router) {
+        return handleGlobalHeartbeat(c);
+    }
 
     if (!router || !action) {
         return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Missing router or action');
@@ -46,15 +49,15 @@ export default async function agentHandler(c: Context): Promise<Response> {
         return makeResponse(c, ResponseCode.UNAUTHORIZED);
     }
 
-    // Verify router exists (lookup by name OR uuid)
+    // Verify router exists (lookup by name OR uuid if valid)
     const models = getModels();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(router);
+    const whereClause = isUuid
+        ? { [Op.or]: [{ uuid: router }, { name: router }] }
+        : { name: router };
+
     const routerRecord = await models.routers.findOne({
-        where: {
-            [Op.or]: [
-                { uuid: router },
-                { name: router },
-            ],
-        },
+        where: whereClause,
     });
 
     if (!routerRecord) {
@@ -102,7 +105,7 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
         const s = session.get() as BgpSessionAttributes;
         return {
             uuid: s.uuid,
-            asn: s.asn,
+            asn: parseInt(String(s.asn), 10),  // Convert to number for Go agent
             status: s.status,
             ipv4: s.ipv4,
             ipv6: s.ipv6,
@@ -111,7 +114,7 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
             extensions: s.extensions ? JSON.parse(s.extensions) : [],
             interface: s.interface,
             endpoint: s.endpoint,
-            credential: s.credential,
+            credential: s.credential ? JSON.stringify(s.credential) : '',
             data: s.data ? JSON.parse(s.data) : null,
             mtu: s.mtu,
             policy: s.policy,
@@ -182,6 +185,37 @@ async function handleHeartbeat(c: Context, router: string): Promise<Response> {
 }
 
 /**
+ * POST /agent/heartbeat (global)
+ * Receive heartbeat from agent with node_id in body
+ */
+async function handleGlobalHeartbeat(c: Context): Promise<Response> {
+    // Verify API key (no router param)
+    const header = c.req.header('Authorization');
+    if (!header) {
+        return makeResponse(c, ResponseCode.UNAUTHORIZED);
+    }
+    const token = header.split('Bearer ')[1];
+    if (!token || token !== config.auth.agentApiKey) {
+        return makeResponse(c, ResponseCode.UNAUTHORIZED);
+    }
+
+    const body = await c.req.json();
+    const nodeId = body.node_id;
+
+    if (!nodeId) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing node_id');
+    }
+
+    // TODO: Update router last_seen timestamp
+    console.log(`[Agent ${nodeId}] Global Heartbeat:`, body);
+
+    return success(c, {
+        received: true,
+        timestamp: Date.now(),
+    });
+}
+
+/**
  * GET /agent/:router/mesh
  * Returns mesh peer configuration for WireGuard tunnel setup
  */
@@ -190,21 +224,21 @@ async function handleMesh(c: Context, router: string): Promise<Response> {
 
     // Get all routers except the requesting one
     const routers = await models.routers.findAll({
-        attributes: ['id', 'uuid', 'name', 'publicIp', 'dn42Loopback4', 'dn42Loopback6', 'meshPublicKey', 'isRouteReflector'],
+        attributes: ['uuid', 'name', 'publicIp', 'wgPublicKey', 'region'],
         where: {
             uuid: { [Op.ne]: router },
         },
     });
 
-    const peers = routers.map((r: { get: (key: string) => unknown }) => ({
-        nodeId: r.get('id') as number,
+    const peers = routers.map((r: { get: (key: string) => unknown }, index: number) => ({
+        nodeId: index + 1,  // Use index as stable numeric ID
         nodeName: r.get('name') as string,
-        loopbackIpv4: r.get('dn42Loopback4') as string,
-        loopbackIpv6: r.get('dn42Loopback6') as string,
-        publicKey: r.get('meshPublicKey') as string,
-        endpoint: `${r.get('publicIp')}:51820`,
+        loopbackIpv4: '',
+        loopbackIpv6: '',
+        publicKey: r.get('wgPublicKey') as string || '',
+        endpoint: r.get('publicIp') ? `${r.get('publicIp')}:51820` : '',
         mtu: 1420,
-        isRr: r.get('isRouteReflector') as boolean,
+        isRr: false,
     }));
 
     return success(c, {

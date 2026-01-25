@@ -7,18 +7,20 @@ import metricsHandler from './handlers/metrics';
 
 export function registerRoutes(app: Hono) {
     // Agent API (for Go agent communication)
-    app.get('/agent/:router/:action', agentHandler);
-    app.post('/agent/:router/:action', agentHandler);
+    app.get('/api/v1/agent/:router/:action', agentHandler);
+    app.post('/api/v1/agent/:router/:action', agentHandler);
+    // Also support heartbeat without router param
+    app.post('/api/v1/agent/heartbeat', agentHandler);
 
     // Authentication
-    app.post('/auth', authHandler);
+    app.post('/api/v1/auth', authHandler);
 
     // Admin operations
-    app.post('/admin', adminHandler);
+    app.post('/api/v1/admin', adminHandler);
 
     // Peering management
-    app.post('/session', peeringHandler);
+    app.post('/api/v1/session', peeringHandler);
 
     // Metrics
-    app.get('/metrics', metricsHandler);
+    app.get('/api/v1/metrics', metricsHandler);
 }

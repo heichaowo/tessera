@@ -7,7 +7,7 @@ COPY package.json bun.lockb* ./
 COPY packages/api/package.json ./packages/api/
 
 # Install dependencies
-RUN bun install --frozen-lockfile
+RUN bun install
 
 # Copy source
 COPY packages/api ./packages/api

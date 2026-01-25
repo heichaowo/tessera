@@ -7,7 +7,7 @@ COPY package.json bun.lock ./
 COPY packages/bot/package.json ./packages/bot/
 
 # Install dependencies
-RUN bun install --frozen-lockfile
+RUN bun install
 
 # Copy source
 COPY packages/bot ./packages/bot

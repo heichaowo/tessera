@@ -51,6 +51,7 @@ main();
 
 export default {
     port: config.server.port,
+    hostname: '0.0.0.0',
     fetch: app.fetch,
 };
 
