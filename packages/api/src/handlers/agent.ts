@@ -5,6 +5,7 @@ import { makeResponse, ResponseCode, success } from '../common/response';
 import { getModels } from '../db/dbContext';
 import { validateBody, isValidationError } from '../schemas/validate';
 import { ModifySessionSchema, HeartbeatSchema, MetricsReportSchema } from '../schemas/agent';
+import { getRedis } from '../db/redisContext';
 import config from '../config';
 import { PeeringStatus, type BgpSessionAttributes } from '../db/models/bgpSessions';
 
@@ -92,11 +93,13 @@ export default async function agentHandler(c: Context): Promise<Response> {
         case 'heartbeat':
             return await handleHeartbeat(c, routerUuid);
         case 'mesh':
-            return await handleMesh(c, routerUuid);
+            return await handleMesh(c, routerUuid, routerRecord);
         case 'mesh/status':
             return await handleMeshStatus(c, routerUuid);
         case 'config':
             return await handleConfig(c, routerRecord);
+        case 'rtt':
+            return await handleRtt(c, routerUuid);
         default:
             return makeResponse(c, ResponseCode.NOT_FOUND, undefined, `Unknown action: ${action}`);
     }
@@ -173,15 +176,52 @@ async function handleModify(c: Context, router: string): Promise<Response> {
 
 /**
  * POST /agent/:router/report
- * Receive metrics from agent
+ * Receive metrics from agent and store in Redis
  */
 async function handleReport(c: Context, router: string): Promise<Response> {
     const body = await c.req.json();
+    const { sessions, node_id, timestamp } = body;
 
-    // TODO: Store metrics in Redis for time-series data
-    console.log(`[Agent ${router}] Report:`, body);
+    if (!sessions || !Array.isArray(sessions)) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing sessions array');
+    }
 
-    return success(c, { received: true });
+    try {
+        const redis = getRedis();
+        const pipeline = redis.pipeline();
+        const reportTs = timestamp || Date.now();
+
+        // Store each session's metrics
+        for (const session of sessions) {
+            if (session.name && session.state) {
+                const key = `metrics:${router}:${session.name}`;
+                pipeline.hset(key, {
+                    state: session.state,
+                    info: session.info || '',
+                    type: session.type || 'bgp',
+                    timestamp: reportTs,
+                });
+                pipeline.expire(key, 3600); // 1 hour TTL
+            }
+        }
+
+        // Store summary for this router
+        const summaryKey = `metrics:${router}:_summary`;
+        pipeline.hset(summaryKey, {
+            sessionCount: sessions.length,
+            lastReport: reportTs,
+            nodeId: node_id || router,
+        });
+        pipeline.expire(summaryKey, 3600);
+
+        await pipeline.exec();
+
+        console.log(`[Agent ${router}] Report: ${sessions.length} sessions stored`);
+    } catch (error) {
+        console.error(`[Agent ${router}] Metrics storage error:`, error);
+    }
+
+    return success(c, { received: true, count: sessions?.length || 0 });
 }
 
 /**
@@ -190,9 +230,14 @@ async function handleReport(c: Context, router: string): Promise<Response> {
  */
 async function handleHeartbeat(c: Context, router: string): Promise<Response> {
     const body = await c.req.json();
+    const models = getModels();
 
-    // TODO: Update router last_seen timestamp
-    // TODO: Store node status in Redis
+    // Update last_seen timestamp
+    await models.routers.update(
+        { lastSeen: new Date() },
+        { where: { uuid: router } }
+    );
+
     console.log(`[Agent ${router}] Heartbeat:`, body);
 
     return success(c, {
@@ -224,15 +269,20 @@ async function handleGlobalHeartbeat(c: Context): Promise<Response> {
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing node_id');
     }
 
-    // Update router mesh_public_key if provided
+    const models = getModels();
+
+    // Build update payload - always include lastSeen
+    const updatePayload: Record<string, unknown> = {
+        lastSeen: new Date(),
+    };
+
+    // Update mesh_public_key if provided
     if (status.meshPublicKey) {
-        const models = getModels();
-        await models.routers.update(
-            { meshPublicKey: status.meshPublicKey },
-            { where: { name: nodeId } }
-        );
+        updatePayload.meshPublicKey = status.meshPublicKey;
         console.log(`[Agent ${nodeId}] Updated meshPublicKey: ${status.meshPublicKey.substring(0, 20)}...`);
     }
+
+    await models.routers.update(updatePayload, { where: { name: nodeId } });
 
     console.log(`[Agent ${nodeId}] Heartbeat: load=${status.loadAvg}, uptime=${status.uptime}s`);
 
@@ -246,29 +296,54 @@ async function handleGlobalHeartbeat(c: Context): Promise<Response> {
  * GET /agent/:router/mesh
  * Returns mesh peer configuration for WireGuard tunnel setup
  */
-async function handleMesh(c: Context, router: string): Promise<Response> {
+async function handleMesh(
+    c: Context,
+    router: string,
+    // biome-ignore lint/suspicious/noExplicitAny: Sequelize model instance
+    routerRecord: any
+): Promise<Response> {
     const models = getModels();
+
+    // Build self info from the requesting router
+    const selfNodeId = routerRecord.get('nodeId') as number ?? 0;
+    const selfNodeName = routerRecord.get('name') as string;
+    const selfNodeType = routerRecord.get('nodeType') as string ?? '';
+
+    const self = {
+        nodeId: selfNodeId,
+        nodeName: selfNodeName,
+        loopbackIpv4: routerRecord.get('dn42Loopback4') as string ?? '',
+        loopbackIpv6: routerRecord.get('dn42Loopback6') as string ?? '',
+        isRr: selfNodeType === 'rr' || selfNodeName.includes('-rr'),
+    };
 
     // Get all routers except the requesting one
     const routers = await models.routers.findAll({
-        attributes: ['uuid', 'name', 'publicIp', 'meshPublicKey', 'region'],
+        attributes: ['uuid', 'name', 'publicIp', 'meshPublicKey', 'region', 'nodeId', 'dn42Loopback4', 'dn42Loopback6', 'nodeType'],
         where: {
             uuid: { [Op.ne]: router },
         },
     });
 
-    const peers = routers.map((r: { get: (key: string) => unknown }, index: number) => ({
-        nodeId: index + 1,  // Use index as stable numeric ID
-        nodeName: r.get('name') as string,
-        loopbackIpv4: '',
-        loopbackIpv6: '',
-        publicKey: r.get('meshPublicKey') as string || '',
-        endpoint: r.get('publicIp') ? `${r.get('publicIp')}:51820` : '',
-        mtu: 1420,
-        isRr: false,
-    }));
+    const peers = routers.map((r: { get: (key: string) => unknown }) => {
+        const nodeName = r.get('name') as string;
+        const nodeType = r.get('nodeType') as string ?? '';
+        const nodeId = r.get('nodeId') as number ?? 0;
+
+        return {
+            nodeId,
+            nodeName,
+            loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
+            loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
+            publicKey: r.get('meshPublicKey') as string ?? '',
+            endpoint: r.get('publicIp') ? `${r.get('publicIp')}:51820` : '',
+            mtu: 1420,
+            isRr: nodeType === 'rr' || nodeName.includes('-rr'),
+        };
+    });
 
     return success(c, {
+        self,
         peers,
     });
 }
@@ -345,4 +420,49 @@ async function handleConfig(
     };
 
     return success(c, agentConfig);
+}
+
+/**
+ * POST /agent/:router/rtt
+ * Receive RTT measurements from agent and store in Redis
+ */
+async function handleRtt(c: Context, router: string): Promise<Response> {
+    const body = await c.req.json();
+    const { measurements } = body;
+
+    if (!measurements || !Array.isArray(measurements)) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing measurements array');
+    }
+
+    try {
+        const redis = getRedis();
+        const timestamp = Date.now();
+
+        // Store RTT data in Redis hash with 1 hour TTL
+        const key = `rtt:${router}`;
+        const pipeline = redis.pipeline();
+
+        for (const m of measurements) {
+            if (m.target && typeof m.rtt_ms === 'number') {
+                pipeline.hset(key, m.target, JSON.stringify({
+                    rtt_ms: m.rtt_ms,
+                    loss: m.loss ?? 0,
+                    timestamp,
+                }));
+            }
+        }
+
+        pipeline.expire(key, 3600); // 1 hour TTL
+        await pipeline.exec();
+
+        console.log(`[Agent ${router}] RTT: received ${measurements.length} measurements`);
+
+        return success(c, {
+            received: true,
+            count: measurements.length,
+        });
+    } catch (error) {
+        console.error(`[Agent ${router}] RTT storage error:`, error);
+        return success(c, { received: true, warning: 'Redis unavailable, data not stored' });
+    }
 }

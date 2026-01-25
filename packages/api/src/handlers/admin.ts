@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { verify } from 'hono/jwt';
 import { makeResponse, ResponseCode, success } from '../common/response';
 import { getModels } from '../db/dbContext';
+import { getRedis } from '../db/redisContext';
 import config from '../config';
 import { PeeringStatus } from '../db/models/bgpSessions';
 
@@ -81,6 +82,8 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await rejectSession(c, body);
         case 'deleteSession':
             return await deleteSessionAdmin(c, body);
+        case 'setMaintenance':
+            return await setMaintenance(c, body);
         default:
             return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
     }
@@ -256,4 +259,68 @@ async function deleteSessionAdmin(c: Context, body: { uuid?: string }): Promise<
     }
 
     return success(c, { message: 'Session queued for deletion' });
+}
+
+/**
+ * Set maintenance mode for a router
+ * This calls the agent's maintenance API and stores state in Redis
+ */
+async function setMaintenance(c: Context, body: { router?: string; enabled?: boolean }): Promise<Response> {
+    const { router, enabled } = body;
+
+    if (!router || enabled === undefined) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing router or enabled');
+    }
+
+    const models = getModels();
+    const routerRecord = await models.routers.findOne({
+        where: { name: router },
+    });
+
+    if (!routerRecord) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Router not found');
+    }
+
+    const publicIp = routerRecord.get('publicIp') as string;
+    if (!publicIp) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Router has no public IP');
+    }
+
+    // Call agent's maintenance API
+    const agentUrl = `http://${publicIp}:8080/maintenance/${enabled ? 'start' : 'stop'}`;
+
+    try {
+        const agentResp = await fetch(agentUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${config.auth.agentApiKey}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!agentResp.ok) {
+            const errorText = await agentResp.text();
+            return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, `Agent returned: ${errorText}`);
+        }
+
+        // Store maintenance state in Redis
+        try {
+            const redis = getRedis();
+            await redis.hset(`maintenance:${router}`, {
+                enabled: enabled ? '1' : '0',
+                changedAt: Date.now().toString(),
+            });
+        } catch (redisError) {
+            console.warn('[Admin] Failed to store maintenance state in Redis:', redisError);
+        }
+
+        console.log(`[Admin] Maintenance ${enabled ? 'enabled' : 'disabled'} for ${router}`);
+        return success(c, {
+            message: `Maintenance mode ${enabled ? 'enabled' : 'disabled'}`,
+            router,
+        });
+    } catch (error) {
+        console.error('[Admin] Failed to call agent maintenance API:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to contact agent');
+    }
 }

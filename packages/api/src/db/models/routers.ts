@@ -18,6 +18,8 @@ export interface RouterAttributes {
     supportsIpv4: boolean;
     supportsIpv6: boolean;
     allowCnPeers: boolean;
+    lastSeen: Date | null;
+    nodeType: string | null;
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -113,6 +115,16 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
             type: DataTypes.BOOLEAN,
             allowNull: false,
             defaultValue: true,
+        },
+        lastSeen: {
+            field: 'last_seen',
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+        nodeType: {
+            field: 'node_type',
+            type: DataTypes.STRING(10),
+            allowNull: true,
         },
     }, {
         timestamps: true,
