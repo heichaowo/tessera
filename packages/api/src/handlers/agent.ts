@@ -40,6 +40,21 @@ export default async function agentHandler(c: Context): Promise<Response> {
         return handleGlobalHeartbeat(c);
     }
 
+    // Handle mesh/status nested route
+    const meshStatusMatch = c.req.path.match(/^\/api\/v1\/agent\/([^/]+)\/mesh\/status$/);
+    if (meshStatusMatch) {
+        const routerName = meshStatusMatch[1] as string;
+        if (!(await verifyAgentApiKey(c, routerName))) {
+            return makeResponse(c, ResponseCode.UNAUTHORIZED);
+        }
+        const models = getModels();
+        const routerRecord = await models.routers.findOne({ where: { name: routerName } });
+        if (!routerRecord) {
+            return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Router not found');
+        }
+        return handleMeshStatus(c, routerRecord.get('uuid') as string);
+    }
+
     if (!router || !action) {
         return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Missing router or action');
     }
@@ -78,6 +93,8 @@ export default async function agentHandler(c: Context): Promise<Response> {
             return await handleHeartbeat(c, routerUuid);
         case 'mesh':
             return await handleMesh(c, routerUuid);
+        case 'mesh/status':
+            return await handleMeshStatus(c, routerUuid);
         case 'config':
             return await handleConfig(c, routerRecord);
         default:
@@ -243,6 +260,25 @@ async function handleMesh(c: Context, router: string): Promise<Response> {
 
     return success(c, {
         peers,
+    });
+}
+
+/**
+ * POST /agent/:router/mesh/status
+ * Receives mesh tunnel status reports from agents
+ */
+async function handleMeshStatus(c: Context, router: string): Promise<Response> {
+    const body = await c.req.json().catch(() => ({}));
+    const { node_id, timestamp, peers } = body;
+
+    // Log mesh status (can be extended to store in DB or emit events)
+    console.log(`[MeshStatus] ${node_id} reported at ${timestamp}:`, peers);
+
+    // Store mesh status in Redis for real-time monitoring (optional)
+    // For now, just acknowledge receipt
+    return success(c, {
+        received: true,
+        timestamp: Date.now(),
     });
 }
 

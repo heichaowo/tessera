@@ -9,6 +9,8 @@ export function registerRoutes(app: Hono) {
     // Agent API (for Go agent communication)
     app.get('/api/v1/agent/:router/:action', agentHandler);
     app.post('/api/v1/agent/:router/:action', agentHandler);
+    // Nested action routes (mesh/status)
+    app.post('/api/v1/agent/:router/mesh/status', agentHandler);
     // Also support heartbeat without router param
     app.post('/api/v1/agent/heartbeat', agentHandler);
 
