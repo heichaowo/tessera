@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { rateLimiter } from './middleware/rateLimiter';
+import { requestId } from './middleware/requestId';
 import { registerRoutes } from './routes';
 import { initDatabase } from './db/dbContext';
 import { initRedis } from './db/redisContext';
@@ -9,7 +11,9 @@ import config from './config';
 const app = new Hono();
 
 // Middleware
+app.use('*', requestId());
 app.use('*', logger());
+app.use('*', rateLimiter());
 app.use('*', cors({
     origin: config.cors.origins,
     credentials: true,

@@ -85,6 +85,58 @@ Bot Agent Configuration (optional):
 | `/health` | GET | Health check |
 | `/metrics` | GET | Prometheus metrics |
 
+## Robustness Features
+
+### Rate Limiting
+
+Redis-based sliding window rate limiting per route:
+
+| Route | Limit |
+|-------|-------|
+| `/agent/*` | 300/min |
+| `/auth` | 60/min |
+| `/admin` | 30/min |
+| Default | 60/min |
+
+Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+
+### Input Validation
+
+All API endpoints use [Zod](https://zod.dev) schema validation:
+
+```typescript
+import { validateBody } from './schemas';
+import { AuthRequestBodySchema } from './schemas/auth';
+
+const parsed = await validateBody(c, AuthRequestBodySchema);
+if (parsed instanceof Response) return parsed;
+```
+
+Schemas: `src/schemas/auth.ts`, `src/schemas/agent.ts`, `src/schemas/peering.ts`
+
+### Structured Logging
+
+JSON-formatted logs with request context:
+
+```typescript
+import { logger } from './common/logger';
+
+logger.info('Session created', { sessionId, asn });
+logger.error('Failed to sync', error, { routerId });
+```
+
+### Audit Logging
+
+Security-critical actions are logged to `audit_logs` table:
+
+```typescript
+import { auditUserAction } from './services/auditLog';
+
+await auditUserAction(c, 'session.create', userAsn, { type: 'session', id: sessionId });
+```
+
+Event types: `auth.*`, `session.*`, `admin.*`, `agent.*`
+
 ## License
 
 MIT

@@ -6,6 +6,7 @@ import { initBgpSessionsModel, type BgpSessionsModel } from './models/bgpSession
 import { initRoutersModel, type RoutersModel } from './models/routers';
 import { initUsersModel, type UsersModel } from './models/users';
 import { initSettingsModel, type SettingsModel } from './models/settings';
+import { initAuditLogsModel, type AuditLogsModel } from './models/auditLogs';
 
 let sequelize: Sequelize | null = null;
 
@@ -14,6 +15,7 @@ export interface Models {
     routers: RoutersModel;
     users: UsersModel;
     settings: SettingsModel;
+    auditLogs: AuditLogsModel;
 }
 
 let models: Models | null = null;
@@ -44,6 +46,7 @@ export async function initDatabase(): Promise<void> {
         routers: initRoutersModel(sequelize),
         users: initUsersModel(sequelize),
         settings: initSettingsModel(sequelize),
+        auditLogs: initAuditLogsModel(sequelize),
     };
 
     // Sync models (in development)
