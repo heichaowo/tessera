@@ -1219,4 +1219,93 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             await ctx.reply(`❌ Failed to restart: ${(error as Error).message}`);
         }
     }
+
+    /**
+     * /status - Show WireGuard and BGP status for all peers
+     */
+    bot.command('status', async (ctx) => {
+        const asn = ctx.session.asn;
+        if (!asn) {
+            await ctx.reply('❌ Please /login first.\\n请先登录');
+            return;
+        }
+
+        await ctx.reply('⏳ Checking status...\\n正在检查状态...');
+
+        try {
+            // Get user's sessions
+            const result = await apiRequest('/session', 'POST', {
+                action: 'list',
+                asn,
+            });
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Error: ${result.message}`);
+                return;
+            }
+
+            const sessions = (result.data?.sessions || []).filter((s: { status: number }) => s.status === 1);
+
+            if (sessions.length === 0) {
+                await ctx.reply('ℹ️ You have no active peers.\\n你没有活跃的 Peer');
+                return;
+            }
+
+            // Check status for each session
+            const { getAgentEndpoint } = await import('../providers/nodes');
+            let statusMessage = `📊 *Status for AS${asn}*\\n\\n`;
+
+            for (const session of sessions) {
+                const router = session.router;
+                statusMessage += `📍 *${router}*\\n`;
+
+                try {
+                    const endpoint = await getAgentEndpoint(router);
+                    if (!endpoint) {
+                        statusMessage += `   ❌ Agent unreachable\\n\\n`;
+                        continue;
+                    }
+
+                    const peerName = `dn42_${asn}`;
+                    const response = await fetch(`${endpoint}/status/${peerName}`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${config.agentToken || ''}`,
+                        },
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json() as {
+                            wg_status?: string;
+                            bgp_status?: string;
+                            last_handshake?: string;
+                            transfer?: { rx: string; tx: string };
+                        };
+
+                        const wgIcon = data.wg_status === 'up' ? '🟢' : '🔴';
+                        const bgpIcon = data.bgp_status?.includes('Established') ? '🟢' : '🟡';
+
+                        statusMessage += `   WG: ${wgIcon} ${data.wg_status || 'unknown'}\\n`;
+                        statusMessage += `   BGP: ${bgpIcon} ${data.bgp_status || 'unknown'}\\n`;
+                        if (data.last_handshake) {
+                            statusMessage += `   Handshake: ${data.last_handshake}\\n`;
+                        }
+                        if (data.transfer) {
+                            statusMessage += `   Traffic: ↓${data.transfer.rx} ↑${data.transfer.tx}\\n`;
+                        }
+                    } else {
+                        statusMessage += `   ⚠️ Status check failed\\n`;
+                    }
+                } catch (e) {
+                    statusMessage += `   ❌ Error checking status\\n`;
+                }
+                statusMessage += `\\n`;
+            }
+
+            await ctx.reply(statusMessage, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('[Status] Error:', error);
+            await ctx.reply('❌ Failed to check status.');
+        }
+    });
 }
