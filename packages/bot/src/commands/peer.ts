@@ -353,6 +353,91 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
     }
 
     /**
+     * Prompt for MTU selection
+     */
+    async function promptMtu(ctx: BotContext) {
+        const keyboard = new InlineKeyboard()
+            .text('1420 (默认)', 'peer:mtu:1420')
+            .text('1400', 'peer:mtu:1400')
+            .row()
+            .text('1380', 'peer:mtu:1380')
+            .text('1280', 'peer:mtu:1280');
+
+        await ctx.reply(
+            `📝 *Step 4: MTU Setting*\\n第四步: MTU 设置\\n\\n` +
+            `Select WireGuard MTU:\\n选择 WireGuard MTU:\\n\\n` +
+            `• \`1420\` - 默认 / Default\\n` +
+            `• \`1400\` - 适用于某些 VPS\\n` +
+            `• \`1380\` - 有额外封装时\\n` +
+            `• \`1280\` - IPv6 最小值`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+    }
+
+    /**
+     * Handle MTU selection callback
+     */
+    bot.callbackQuery(/^peer:mtu:(\d+)$/, async (ctx) => {
+        const mtu = parseInt(ctx.match?.[1] || '1420', 10);
+        if (!ctx.session.peerFlow) return;
+
+        ctx.session.peerFlow.mtu = mtu;
+        ctx.session.peerFlow.step = 'input_psk';
+
+        await ctx.answerCallbackQuery();
+        await ctx.editMessageText(`✅ MTU: ${mtu}`);
+        await promptPsk(ctx);
+    });
+
+    /**
+     * Prompt for PSK option
+     */
+    async function promptPsk(ctx: BotContext) {
+        const keyboard = new InlineKeyboard()
+            .text('🔄 Auto Generate 自动生成', 'peer:psk:auto')
+            .row()
+            .text('❌ No PSK 不使用', 'peer:psk:none');
+
+        await ctx.reply(
+            `📝 *Step 5: Pre-Shared Key (PSK)*\\n第五步: 预共享密钥\\n\\n` +
+            `Use PSK for extra security?\\n使用 PSK 增加安全性?\\n\\n` +
+            `• 🔄 Auto Generate - 自动生成 PSK\\n` +
+            `• ❌ No PSK - 不使用 PSK`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+    }
+
+    /**
+     * Handle PSK selection callback
+     */
+    bot.callbackQuery(/^peer:psk:(auto|none)$/, async (ctx) => {
+        const choice = ctx.match?.[1];
+        if (!ctx.session.peerFlow) return;
+
+        if (choice === 'auto') {
+            // Generate PSK (32 bytes base64)
+            const psk = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
+            ctx.session.peerFlow.psk = psk;
+            await ctx.answerCallbackQuery();
+            await ctx.editMessageText(`✅ PSK Generated`);
+            await ctx.reply(
+                `🔑 *PSK Generated*\\n已生成 PSK\\n\\n` +
+                `\`${psk}\`\\n\\n` +
+                `⚠️ Save this key! You need to configure it on your side.\\n` +
+                `请保存此密钥，稍后需要在你这边配置。`,
+                { parse_mode: 'Markdown' }
+            );
+        } else {
+            ctx.session.peerFlow.psk = null;
+            await ctx.answerCallbackQuery();
+            await ctx.editMessageText('✅ No PSK');
+        }
+
+        ctx.session.peerFlow.step = 'confirm';
+        await showConfirmation(ctx);
+    });
+
+    /**
      * Handle text input during peer flow
      */
     bot.on('message:text', async (ctx, next) => {
@@ -440,8 +525,19 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     await ctx.reply('❌ Invalid WireGuard public key. Should be 44 characters ending with =');
                     return;
                 }
-                ctx.session.peerFlow = { ...flow, step: 'confirm', publicKey: text };
-                await showConfirmation(ctx);
+                ctx.session.peerFlow = { ...flow, step: 'input_mtu', publicKey: text };
+                await promptMtu(ctx);
+                break;
+            }
+
+            case 'input_mtu': {
+                const mtu = parseInt(text, 10);
+                if (isNaN(mtu) || mtu < 1280 || mtu > 1500) {
+                    await ctx.reply('❌ Invalid MTU. Please enter 1280-1500.');
+                    return;
+                }
+                ctx.session.peerFlow = { ...flow, step: 'input_psk', mtu };
+                await promptPsk(ctx);
                 break;
             }
 
@@ -470,13 +566,17 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 ? `\`${flow.endpoint}\``
                 : 'None (NAT)';
 
+        const pskDisplay = flow.psk ? '✅ Enabled' : '❌ Disabled';
+
         const confirmText =
             `✅ *Confirm Peer Creation*\\n确认创建 Peer\\n\\n` +
             `📍 Node: \`${flow.routerName}\`\\n` +
             `🆔 ASN: \`AS${asn}\`\\n` +
             `🌐 Your IPv6: \`${flow.ipv6}\`\\n` +
             `📡 Your Endpoint: ${endpointDisplay}\\n` +
-            `🔑 Your PublicKey: \`${flow.publicKey?.slice(0, 20)}...\`\\n\\n` +
+            `🔑 Your PublicKey: \`${flow.publicKey?.slice(0, 20)}...\`\\n` +
+            `📏 MTU: \`${flow.mtu || 1420}\`\\n` +
+            `🔐 PSK: ${pskDisplay}\\n\\n` +
             `*Server Info:*\\n` +
             `🌐 Endpoint: \`${flow.serverEndpoint}:${flow.serverPort}\`\\n` +
             `🔑 PublicKey: \`${flow.serverPubkey}\`\\n` +

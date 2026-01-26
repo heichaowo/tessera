@@ -19,6 +19,8 @@ interface SessionData {
         serverPort?: number;
         serverPubkey?: string;
         serverLla?: string;
+        // Session type
+        sessionType?: 'ipv6_only' | 'ipv6_ipv4';
         // User inputs
         ipv6?: string;
         localIpv6?: string;
@@ -26,6 +28,7 @@ interface SessionData {
         port?: number;
         publicKey?: string;
         mtu?: number;
+        psk?: string | null;
         // Node map for selection
         nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number }>;
     };
