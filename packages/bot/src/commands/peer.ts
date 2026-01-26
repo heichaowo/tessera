@@ -101,6 +101,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             `*Network Tools 网络工具:*\\n` +
             `• /lg - Looking glass 路由查询\\n` +
             `• /ping - Ping test 连通测试\\n` +
+            `• /traceroute - Route trace 路由追踪\\n` +
             `• /whois - DN42 Whois 查询\\n` +
             `• /cancel - Cancel operation 取消操作\\n`;
 
@@ -1632,6 +1633,92 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         } catch (error) {
             console.error('[Whois] Error:', error);
             await ctx.reply('❌ Whois lookup failed.');
+        }
+    });
+
+    /**
+     * /traceroute - Traceroute from nodes
+     * Usage: /traceroute <target> [node]
+     */
+    bot.command(['traceroute', 'tr'], async (ctx) => {
+        const args = ctx.match?.trim().split(/\s+/) || [];
+
+        if (args.length === 0 || args[0] === '') {
+            await ctx.reply(
+                `🔀 *Traceroute*\\n\\n` +
+                `Usage: \`/traceroute <target> [node]\`\\n` +
+                `Alias: \`/tr\`\\n\\n` +
+                `Examples:\\n` +
+                `\`/tr 172.20.0.53\`\\n` +
+                `\`/tr fd00::1 hk-edge\``,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        const target = args[0] || '';
+        const nodeName = args[1];
+
+        await ctx.reply(`🔀 Tracing route to \`${target}\`...\\nThis may take a moment.`, { parse_mode: 'Markdown' });
+
+        try {
+            const { getAgentEndpoint, getAllNodes } = await import('../providers/nodes');
+            const nodes = nodeName ? [nodeName] : (await getAllNodes()).slice(0, 1);
+
+            if (nodes.length === 0) {
+                await ctx.reply('❌ No nodes available');
+                return;
+            }
+
+            for (const node of nodes) {
+                const endpoint = await getAgentEndpoint(node);
+                if (!endpoint) {
+                    await ctx.reply(`📍 *${node}*: ❌ Unreachable`, { parse_mode: 'Markdown' });
+                    continue;
+                }
+
+                try {
+                    const response = await fetch(`${endpoint}/traceroute`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${config.agentToken || ''}`,
+                        },
+                        body: JSON.stringify({ target }),
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json() as {
+                            hops?: Array<{ hop: number; ip?: string; rtt?: string }>;
+                            raw?: string;
+                        };
+
+                        let result = `🔀 *Traceroute from ${node} to \`${target}\`*\\n\\n`;
+
+                        if (data.hops && data.hops.length > 0) {
+                            for (const hop of data.hops.slice(0, 15)) {
+                                result += `${hop.hop}. ${hop.ip || '*'} ${hop.rtt || ''}\\n`;
+                            }
+                            if (data.hops.length > 15) {
+                                result += `... (${data.hops.length - 15} more hops)`;
+                            }
+                        } else if (data.raw) {
+                            result += `\`\`\`\\n${data.raw.slice(0, 500)}\\n\`\`\``;
+                        } else {
+                            result += `No route data`;
+                        }
+
+                        await ctx.reply(result, { parse_mode: 'Markdown' });
+                    } else {
+                        await ctx.reply(`📍 *${node}*: ⚠️ Traceroute failed`, { parse_mode: 'Markdown' });
+                    }
+                } catch (e) {
+                    await ctx.reply(`📍 *${node}*: ❌ Error`, { parse_mode: 'Markdown' });
+                }
+            }
+        } catch (error) {
+            console.error('[Traceroute] Error:', error);
+            await ctx.reply('❌ Traceroute failed.');
         }
     });
 }
