@@ -57,6 +57,7 @@ services:
       - API_URL=http://moenet-api:3000/api/v1
       - API_TOKEN=${API_TOKEN}
       - TELEGRAM_ADMIN_USERNAME=${TELEGRAM_ADMIN_USERNAME}
+      - TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID}
       - TELEGRAM_CONTACT=${TELEGRAM_CONTACT:-@heicha}
       - LOCAL_ASN=${LOCAL_ASN:-4242420998}
       - AGENT_PORT=${AGENT_PORT:-8080}
@@ -64,8 +65,13 @@ services:
       - WEBHOOK_DOMAIN=${WEBHOOK_DOMAIN}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
       - WEBHOOK_PORT=${WEBHOOK_PORT:-8443}
+      - REDIS_URL=redis://moenet-redis:6379
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-20}
+      - RATE_LIMIT_WINDOW_MS=${RATE_LIMIT_WINDOW_MS:-60000}
     depends_on:
       api:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
