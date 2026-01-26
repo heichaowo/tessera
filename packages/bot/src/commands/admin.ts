@@ -148,7 +148,8 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
     /**
      * /addpeer - Admin command to directly add peer (bypasses approval)
-     * Usage: /addpeer <ASN> <node> <endpoint:port> <pubkey> <ipv6>
+     * Usage: /addpeer <ASN> [node] [endpoint:port] [pubkey] [ipv6]
+     * If only ASN provided, starts interactive wizard
      */
     bot.command('addpeer', async (ctx) => {
         if (!isAdmin(ctx)) {
@@ -158,13 +159,16 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         const args = ctx.match?.trim().split(/\s+/) || [];
 
-        if (args.length < 5) {
+        // No args - show help
+        if (args.length === 0 || args[0] === '') {
             await ctx.reply(
                 `🔧 *Admin Add Peer 管理员添加 Peer*\n\n` +
                 `Usage 用法:\n` +
-                `\`/addpeer <ASN> <node> <endpoint:port> <pubkey> <ipv6>\`\n\n` +
+                `• \`/addpeer <ASN>\` - 交互式向导\n` +
+                `• \`/addpeer <ASN> <node> <endpoint:port> <pubkey> <ipv6>\` - 一行命令\n\n` +
                 `Example 示例:\n` +
-                `\`/addpeer 4242420998 hk-edge tunnel.example.com:51820 PUBKEY_BASE64 fd00::1\`\n\n` +
+                `\`/addpeer 4242420998\` - 启动向导\n` +
+                `\`/addpeer 4242420998 hk-edge tunnel.example.com:51820 PUBKEY fd00::1\`\n\n` +
                 `Note: Peer will be created with ACTIVE status (no approval needed)\n` +
                 `注意: Peer 将以 ACTIVE 状态创建（无需审批）`,
                 { parse_mode: 'Markdown' }
@@ -173,17 +177,49 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         }
 
         const asnStr = args[0] || '';
-        const node = args[1] || '';
-        const endpointPort = args[2] || '';
-        const pubkey = args[3] || '';
-        const ipv6 = args[4] || '';
         const asn = parseInt(asnStr.replace(/^AS/i, ''), 10);
-        const [endpoint, port] = endpointPort.split(':');
 
         if (isNaN(asn)) {
             await ctx.reply('❌ Invalid ASN format');
             return;
         }
+
+        // Single arg (ASN only) - start interactive wizard
+        if (args.length === 1) {
+            await ctx.reply(
+                `🔧 *Admin Add Peer Wizard*\n` +
+                `为 AS${asn} 添加 Peer\n\n` +
+                `Starting wizard...`,
+                { parse_mode: 'Markdown' }
+            );
+
+            // Initialize peerFlow in admin mode
+            ctx.session.peerFlow = {
+                step: 'admin_select_node',
+                isAdminMode: true,
+                targetAsn: asn,
+            };
+
+            // Trigger node selection (same as /peer)
+            await startNodeSelection(ctx, asn);
+            return;
+        }
+
+        // Full command mode - at least 5 args needed
+        if (args.length < 5) {
+            await ctx.reply(
+                `❌ Not enough arguments.\n\n` +
+                `Use \`/addpeer ${asn}\` for interactive wizard, or provide all 5 args:\n` +
+                `\`/addpeer <ASN> <node> <endpoint:port> <pubkey> <ipv6>\``,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+        const node = args[1] || '';
+        const endpointPort = args[2] || '';
+        const pubkey = args[3] || '';
+        const ipv6 = args[4] || '';
+        const [endpoint, port] = endpointPort.split(':');
 
         if (!pubkey || pubkey.length !== 44) {
             await ctx.reply('❌ Invalid WireGuard public key (should be 44 chars base64)');
@@ -227,6 +263,74 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             await ctx.reply(`❌ Failed to create peer: ${(error as Error).message}`);
         }
     });
+
+    /**
+     * Start node selection for admin wizard
+     * Shares the same logic as /peer but marks as admin mode
+     */
+    async function startNodeSelection(ctx: BotContext, asn: number) {
+        try {
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'enumRouters',
+            }, config.apiToken);
+
+            if (result.code !== 0 || !result.data?.routers) {
+                await ctx.reply('❌ Failed to fetch nodes.');
+                ctx.session.peerFlow = undefined;
+                return;
+            }
+
+            const routers = result.data.routers.filter((r: RouterInfo) => r.isOpen);
+
+            if (routers.length === 0) {
+                await ctx.reply('❌ No available nodes.');
+                ctx.session.peerFlow = undefined;
+                return;
+            }
+
+            // Build keyboard
+            const keyboard = new InlineKeyboard();
+            const nodeMap: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number }> = {};
+
+            routers.forEach((r, i) => {
+                const label = r.name;
+                keyboard.text(label, `peer:node:${label}`);
+                if ((i + 1) % 2 === 0) keyboard.row();
+                nodeMap[label] = {
+                    uuid: r.uuid,
+                    endpoint: r.endpoint || r.name,
+                    pubkey: r.wgPubkey || 'N/A',
+                    nodeId: r.nodeId || 0,
+                };
+            });
+
+            ctx.session.peerFlow = {
+                ...ctx.session.peerFlow!,
+                step: 'select_node',
+                nodeMap,
+            };
+
+            // Calculate port for this ASN
+            let userPort: number;
+            if (asn >= 4242420000 && asn <= 4242429999) {
+                userPort = 30000 + (asn % 10000);
+            } else if (asn >= 4201270000 && asn <= 4201279999) {
+                userPort = 40000 + (asn % 10000);
+            } else {
+                userPort = 50000 + (asn % 10000);
+            }
+
+            await ctx.reply(
+                `📡 *Select Node for AS${asn}*\n选择节点\n\n` +
+                `Port will be: \`${userPort}\``,
+                { parse_mode: 'Markdown', reply_markup: keyboard }
+            );
+        } catch (error) {
+            console.error('[AddPeer Wizard] Error:', error);
+            await ctx.reply('❌ Failed to fetch nodes.');
+            ctx.session.peerFlow = undefined;
+        }
+    }
 }
 
 /**
@@ -321,8 +425,12 @@ interface SessionInfo {
 }
 
 interface RouterInfo {
+    uuid: string;
     name: string;
     location: string;
     sessionCount: number;
     isOpen: boolean;
+    endpoint?: string;
+    wgPubkey?: string;
+    nodeId?: number;
 }

@@ -594,21 +594,26 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
      */
     bot.callbackQuery('peer:confirm', async (ctx) => {
         const flow = ctx.session.peerFlow;
-        const asn = ctx.session.asn;
+        // Use targetAsn for admin mode, otherwise session asn
+        const asn = flow?.isAdminMode ? flow.targetAsn : ctx.session.asn;
         if (!flow || !asn) return;
 
         await ctx.answerCallbackQuery('Creating peer...');
         await ctx.editMessageText('⏳ Creating peer...\\n正在创建 Peer...');
 
         try {
-            // Call API to create session
+            // Call API to create session - use adminCreate for admin mode
+            const action = flow.isAdminMode ? 'adminCreate' : 'create';
             const result = await apiRequest('/session', 'POST', {
-                action: 'create',
+                action,
                 asn,
                 router: flow.routerUuid,
                 ipv6: flow.ipv6,
                 endpoint: flow.endpoint && flow.port ? `${flow.endpoint}:${flow.port}` : undefined,
                 publicKey: flow.publicKey,
+                mtu: flow.mtu || 1420,
+                psk: flow.psk,
+                status: flow.isAdminMode ? 1 : undefined, // ACTIVE for admin, undefined for normal
             }, config.apiToken);
 
             if (result.code !== 0) {
@@ -617,11 +622,13 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            // Success!
+            // Success message differs based on mode
+            const statusText = flow.isAdminMode
+                ? `✅ Status: ACTIVE (免审核)`
+                : `⏳ Status: Pending Review\\n等待管理员审核`;
+
             const successText =
                 `🎉 *Peer Created Successfully!*\\n成功创建 Peer!\\n\\n` +
-                `Your peer request has been submitted.\\n` +
-                `已提交 Peer 请求。\\n\\n` +
                 `📍 Node: \`${flow.routerName}\`\\n` +
                 `🆔 ASN: \`AS${asn}\`\\n\\n` +
                 `*Your WireGuard Config:*\\n` +
@@ -631,8 +638,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 `Endpoint = ${flow.serverEndpoint}:${flow.serverPort}\\n` +
                 `AllowedIPs = 172.20.0.0/14, 172.31.0.0/16, fd00::/8, fe80::/64\\n` +
                 `\`\`\`\\n\\n` +
-                `⏳ Status: Pending Review\\n` +
-                `等待管理员审核`;
+                statusText;
 
             await ctx.reply(successText, { parse_mode: 'Markdown' });
             ctx.session.peerFlow = undefined;

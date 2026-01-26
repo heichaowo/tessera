@@ -12,6 +12,10 @@ interface SessionData {
     isAdmin?: boolean;
     peerFlow?: {
         step: string;
+        // Admin mode flags
+        isAdminMode?: boolean;  // true for /addpeer
+        targetAsn?: number;     // ASN being added (for admin mode)
+        // Router info
         routerName?: string;
         routerUuid?: string;
         // Server-side WG info
