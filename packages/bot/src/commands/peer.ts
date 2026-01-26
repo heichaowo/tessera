@@ -548,6 +548,32 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             // Modify handlers
+            case 'modify_ipv6': {
+                const ipv6 = text.includes('/') ? text.split('/')[0] : text;
+                if (!isValidIPv6(ipv6 || '')) {
+                    await ctx.reply('❌ Invalid IPv6 address. Please try again.');
+                    return;
+                }
+
+                try {
+                    const result = await apiRequest('/session', 'POST', {
+                        action: 'update',
+                        uuid: flow.routerUuid,
+                        ipv6,
+                    }, config.apiToken);
+
+                    if (result.code !== 0) {
+                        await ctx.reply(`❌ Failed: ${result.message}`);
+                    } else {
+                        await ctx.reply(`✅ IPv6 updated to \`${ipv6}\`\\nIPv6 已更新`, { parse_mode: 'Markdown' });
+                    }
+                } catch (e) {
+                    await ctx.reply('❌ Update failed');
+                }
+                ctx.session.peerFlow = undefined;
+                break;
+            }
+
             case 'modify_endpoint': {
                 const uuid = flow.routerUuid;
                 let endpoint: string | null = null;
@@ -848,9 +874,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         await ctx.answerCallbackQuery();
 
         const keyboard = new InlineKeyboard()
-            .text('📡 Endpoint 端点', `modify:field:${uuid}:endpoint`).row()
-            .text('🔑 Public Key 公钥', `modify:field:${uuid}:pubkey`).row()
+            .text('🌐 IPv6', `modify:field:${uuid}:ipv6`)
+            .text('📡 Endpoint', `modify:field:${uuid}:endpoint`).row()
+            .text('🔑 PubKey', `modify:field:${uuid}:pubkey`)
             .text('📏 MTU', `modify:field:${uuid}:mtu`).row()
+            .text('🔐 PSK', `modify:field:${uuid}:psk`).row()
             .text('🚫 Cancel 取消', 'modify:cancel');
 
         await ctx.editMessageText(
@@ -878,7 +906,14 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         };
 
         let promptText = '';
+        let keyboard: InlineKeyboard | undefined;
         switch (field) {
+            case 'ipv6':
+                promptText = `🌐 *Modify IPv6*\\n\\n` +
+                    `Enter new IPv6 address for BGP:\\n` +
+                    `输入新的 BGP IPv6 地址:\\n\\n` +
+                    `Supported: \`fe80::/64\` Link-Local or \`fc00::/7\` ULA`;
+                break;
             case 'endpoint':
                 promptText = `📡 *Modify Endpoint*\\n\\n` +
                     `Enter new endpoint (domain:port or IP:port):\\n` +
@@ -897,9 +932,18 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     `Enter new MTU (1280-1500):\\n` +
                     `输入新的 MTU (1280-1500):`;
                 break;
+            case 'psk':
+                promptText = `🔐 *Modify PSK*\\n\\n` +
+                    `Choose action:\\n选择操作:`;
+                keyboard = new InlineKeyboard()
+                    .text('🔄 Generate New 生成新密钥', `modify:psk:${uuid}:generate`).row()
+                    .text('❌ Disable PSK 禁用', `modify:psk:${uuid}:disable`).row()
+                    .text('🚫 Cancel 取消', 'modify:cancel');
+                ctx.session.peerFlow = undefined; // PSK uses buttons, not text
+                break;
         }
 
-        await ctx.editMessageText(promptText, { parse_mode: 'Markdown' });
+        await ctx.editMessageText(promptText, { parse_mode: 'Markdown', reply_markup: keyboard });
     });
 
     /**
@@ -909,6 +953,50 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         ctx.session.peerFlow = undefined;
         await ctx.answerCallbackQuery('Cancelled');
         await ctx.editMessageText('🚫 Modify cancelled.\\n已取消修改');
+    });
+
+    /**
+     * Handle PSK modify callbacks
+     */
+    bot.callbackQuery(/^modify:psk:(.+):(generate|disable)$/, async (ctx) => {
+        const uuid = ctx.match?.[1];
+        const action = ctx.match?.[2];
+        if (!uuid || !action) return;
+
+        await ctx.answerCallbackQuery('Updating...');
+
+        try {
+            let psk: string | null = null;
+            if (action === 'generate') {
+                psk = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
+            }
+
+            const result = await apiRequest('/session', 'POST', {
+                action: 'update',
+                uuid,
+                psk,
+            }, config.apiToken);
+
+            if (result.code !== 0) {
+                await ctx.editMessageText(`❌ Failed: ${result.message}`);
+                return;
+            }
+
+            if (action === 'generate') {
+                await ctx.editMessageText(
+                    `✅ *PSK Updated*\\n已更新 PSK\\n\\n` +
+                    `New PSK:\\n\`${psk}\`\\n\\n` +
+                    `⚠️ Save this key! Configure it on your side.\\n` +
+                    `请保存并在你的配置中使用此密钥。`,
+                    { parse_mode: 'Markdown' }
+                );
+            } else {
+                await ctx.editMessageText('✅ PSK disabled\\nPSK 已禁用');
+            }
+        } catch (error) {
+            console.error('[Modify PSK] Error:', error);
+            await ctx.editMessageText('❌ Update failed');
+        }
     });
 
     /**
