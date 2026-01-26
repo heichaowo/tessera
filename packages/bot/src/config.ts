@@ -10,7 +10,7 @@ export default {
 
     // Admin settings
     adminUsername: process.env.TELEGRAM_ADMIN_USERNAME || '',
-    adminChatId: process.env.TELEGRAM_ADMIN_CHAT_ID || '',  // Chat ID for admin notifications
+    adminChatId: process.env.TELEGRAM_ADMIN_CHAT_ID || '',
     localAsn: Number(process.env.LOCAL_ASN) || 4242420998,
 
     // Agent settings
@@ -19,10 +19,19 @@ export default {
     agentHosts: JSON.parse(process.env.AGENT_HOSTS || '{}') as Record<string, string>,
     nodeNames: JSON.parse(process.env.NODE_NAMES || '{}') as Record<string, string>,
 
-    // Webhook settings (required)
+    // Webhook settings
     webhookDomain: process.env.WEBHOOK_DOMAIN || '',
     webhookSecret: process.env.WEBHOOK_SECRET || '',
     webhookPort: Number(process.env.WEBHOOK_PORT) || 8443,
+
+    // Redis for session persistence
+    redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
+
+    // Rate limiting (requests per window)
+    rateLimit: {
+        maxRequests: Number(process.env.RATE_LIMIT_MAX) || 20,
+        windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60000,
+    },
 
     // Contact info
     telegramContact: process.env.TELEGRAM_CONTACT || '@heicha',

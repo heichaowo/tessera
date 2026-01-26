@@ -2,6 +2,7 @@ import { Bot, Context, session, type SessionFlavor, webhookCallback } from 'gram
 import { Hono } from 'hono';
 import { registerCommands } from './commands';
 import config from './config';
+import { rateLimitMiddleware, metricsMiddleware, getMetricsSummary } from './middleware';
 
 /**
  * Session data for user state
@@ -12,20 +13,15 @@ interface SessionData {
     isAdmin?: boolean;
     peerFlow?: {
         step: string;
-        // Admin mode flags
-        isAdminMode?: boolean;  // true for /addpeer
-        targetAsn?: number;     // ASN being added (for admin mode)
-        // Router info
+        isAdminMode?: boolean;
+        targetAsn?: number;
         routerName?: string;
         routerUuid?: string;
-        // Server-side WG info
         serverEndpoint?: string;
         serverPort?: number;
         serverPubkey?: string;
         serverLla?: string;
-        // Session type
         sessionType?: 'ipv6_only' | 'ipv6_ipv4';
-        // User inputs
         ipv6?: string;
         localIpv6?: string;
         endpoint?: string;
@@ -33,7 +29,6 @@ interface SessionData {
         publicKey?: string;
         mtu?: number;
         psk?: string | null;
-        // Node map for selection
         nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number }>;
     };
 }
@@ -46,10 +41,18 @@ export type BotContext = Context & SessionFlavor<SessionData>;
 export function createBot(): Bot<BotContext> {
     const bot = new Bot<BotContext>(config.telegramToken);
 
+    // Session middleware (in-memory for now, Redis upgrade available)
     bot.use(session({
         initial: (): SessionData => ({}),
     }));
 
+    // Rate limiting middleware
+    bot.use(rateLimitMiddleware());
+
+    // Metrics collection middleware
+    bot.use(metricsMiddleware());
+
+    // Error handler
     bot.catch((err) => {
         console.error('[Bot] Error:', err);
     });
@@ -63,33 +66,26 @@ export function createBot(): Bot<BotContext> {
  */
 async function setBotCommands(bot: Bot<BotContext>) {
     await bot.api.setMyCommands([
-        { command: 'ping', description: 'Ping IP/Domain 网络测试' },
-        { command: 'tcping', description: 'TCP Ping 端口测试' },
+        { command: 'start', description: 'Start / Help 开始' },
+        { command: 'help', description: 'Show commands 帮助' },
+        { command: 'login', description: 'Login with ASN 登录' },
+        { command: 'logout', description: 'Logout 登出' },
+        { command: 'peer', description: 'Create peer 建立连接' },
+        { command: 'info', description: 'Peer status 连接状态' },
+        { command: 'modify', description: 'Modify peer 修改连接' },
+        { command: 'remove', description: 'Remove peer 删除连接' },
+        { command: 'status', description: 'WG/BGP status 状态' },
+        { command: 'restart', description: 'Restart peer 重启连接' },
+        { command: 'ping', description: 'Ping test 网络测试' },
         { command: 'trace', description: 'Traceroute 路由追踪' },
         { command: 'whois', description: 'WHOIS lookup 信息查询' },
         { command: 'dig', description: 'DNS lookup DNS查询' },
-        { command: 'findnoc', description: 'Find NOC contact 查找联系人' },
-        { command: 'login', description: 'Login with ASN 登录' },
-        { command: 'logout', description: 'Logout 登出' },
-        { command: 'whoami', description: 'Show current user 当前用户' },
-        { command: 'peer', description: 'Create a peer 建立连接' },
-        { command: 'modify', description: 'Modify peer 修改连接' },
-        { command: 'remove', description: 'Remove peer 删除连接' },
-        { command: 'restart', description: 'Restart peer 重启连接' },
-        { command: 'info', description: 'Peer status 连接状态' },
-        { command: 'peerlist', description: 'Peer list 连接列表' },
-        { command: 'stats', description: 'Network stats 网络统计' },
-        { command: 'rank', description: 'Node ranking 节点排行' },
-        { command: 'main', description: 'Maintenance 维护模式' },
-        { command: 'pending', description: 'Pending approvals 待审批' },
-        { command: 'nodes', description: 'List nodes 节点列表' },
-        { command: 'block', description: 'Blocklist 黑名单' },
-        { command: 'help', description: 'Help 帮助' },
+        { command: 'cancel', description: 'Cancel operation 取消操作' },
     ]);
 }
 
 /**
- * Main entry point - Webhook only
+ * Main entry point
  */
 async function main() {
     if (!config.telegramToken) {
@@ -108,11 +104,14 @@ async function main() {
     const port = config.webhookPort;
     const webhookUrl = `https://${config.webhookDomain}/bot${config.telegramToken}`;
 
-    // Create Hono app for webhook
+    // Create Hono app for webhook and metrics
     const app = new Hono();
 
-    // Health check
+    // Health check endpoint
     app.get('/health', (c) => c.json({ status: 'ok' }));
+
+    // Metrics endpoint
+    app.get('/metrics', (c) => c.json(getMetricsSummary()));
 
     // Webhook endpoint
     const handleUpdate = webhookCallback(bot, 'hono', {
@@ -128,6 +127,7 @@ async function main() {
 
     console.log(`🤖 MoeNet DN42 Bot (Webhook)`);
     console.log(`🔗 Webhook: ${webhookUrl}`);
+    console.log(`📊 Metrics: http://localhost:${port}/metrics`);
     console.log(`🚀 Starting server on port ${port}...`);
 
     Bun.serve({
