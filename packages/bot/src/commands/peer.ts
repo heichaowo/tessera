@@ -97,9 +97,12 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             `• /modify - Modify peer 修改 Peer\\n` +
             `• /remove - Remove peer 删除 Peer\\n` +
             `• /status - WG/BGP status 状态查询\\n` +
-            `• /restart - Restart WG+BGP 重启\\n` +
+            `• /restart - Restart WG+BGP 重启\\n\\n` +
+            `*Network Tools 网络工具:*\\n` +
             `• /lg - Looking glass 路由查询\\n` +
-            `• /cancel - Cancel current operation 取消操作\\n`;
+            `• /ping - Ping test 连通测试\\n` +
+            `• /whois - DN42 Whois 查询\\n` +
+            `• /cancel - Cancel operation 取消操作\\n`;
 
         if (isAdmin) {
             helpText += `\\n*Admin Commands 管理员命令:*\\n` +
@@ -1498,6 +1501,137 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         } catch (error) {
             console.error('[LG] Error:', error);
             await ctx.reply('❌ Route lookup failed.');
+        }
+    });
+
+    /**
+     * /ping - Ping test from nodes
+     * Usage: /ping <target> [node]
+     */
+    bot.command('ping', async (ctx) => {
+        const args = ctx.match?.trim().split(/\s+/) || [];
+
+        if (args.length === 0 || args[0] === '') {
+            await ctx.reply(
+                `🏓 *Ping Test*\\n\\n` +
+                `Usage: \`/ping <target> [node]\`\\n\\n` +
+                `Examples:\\n` +
+                `\`/ping 172.20.0.53\`\\n` +
+                `\`/ping fd00::1 hk-edge\``,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        const target = args[0];
+        const nodeName = args[1];
+
+        await ctx.reply(`🏓 Pinging \`${target}\`...`, { parse_mode: 'Markdown' });
+
+        try {
+            const { getAgentEndpoint, getAllNodes } = await import('../providers/nodes');
+            const nodes = nodeName ? [nodeName] : (await getAllNodes()).slice(0, 1);
+
+            if (nodes.length === 0) {
+                await ctx.reply('❌ No nodes available');
+                return;
+            }
+
+            let resultMessage = `🏓 *Ping Results for \`${target}\`*\\n\\n`;
+
+            for (const node of nodes) {
+                const endpoint = await getAgentEndpoint(node);
+                if (!endpoint) {
+                    resultMessage += `📍 *${node}*: ❌ Unreachable\\n`;
+                    continue;
+                }
+
+                try {
+                    const response = await fetch(`${endpoint}/ping`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${config.agentToken || ''}`,
+                        },
+                        body: JSON.stringify({ target }),
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json() as {
+                            success?: boolean;
+                            rtt?: string;
+                            loss?: string;
+                        };
+
+                        if (data.success) {
+                            resultMessage += `📍 *${node}*: ✅ ${data.rtt || 'OK'}\\n`;
+                        } else {
+                            resultMessage += `📍 *${node}*: ❌ ${data.loss || 'Failed'}\\n`;
+                        }
+                    } else {
+                        resultMessage += `📍 *${node}*: ⚠️ Error\\n`;
+                    }
+                } catch (e) {
+                    resultMessage += `📍 *${node}*: ❌ Error\\n`;
+                }
+            }
+
+            await ctx.reply(resultMessage, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('[Ping] Error:', error);
+            await ctx.reply('❌ Ping failed.');
+        }
+    });
+
+    /**
+     * /whois - DN42 Whois lookup
+     * Usage: /whois <query>
+     */
+    bot.command('whois', async (ctx) => {
+        const query = ctx.match?.trim();
+
+        if (!query) {
+            await ctx.reply(
+                `🔍 *DN42 Whois*\\n\\n` +
+                `Usage: \`/whois <query>\`\\n\\n` +
+                `Examples:\\n` +
+                `\`/whois AS4242420998\`\\n` +
+                `\`/whois 172.20.0.0/14\`\\n` +
+                `\`/whois MOENET-MNT\``,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        await ctx.reply(`🔍 Looking up \`${query}\`...`, { parse_mode: 'Markdown' });
+
+        try {
+            // Query DN42 whois server
+            const response = await fetch(`https://explorer.burble.com/api/registry/aut-num/${encodeURIComponent(query)}`, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' },
+            });
+
+            if (response.ok) {
+                const data = await response.json() as Record<string, unknown>;
+                let result = `🔍 *Whois: \`${query}\`*\\n\\n`;
+
+                // Format key fields
+                const fields = ['aut-num', 'as-name', 'descr', 'admin-c', 'tech-c', 'mnt-by'];
+                for (const field of fields) {
+                    if (data[field]) {
+                        const value = Array.isArray(data[field]) ? (data[field] as string[]).join(', ') : data[field];
+                        result += `*${field}*: \`${value}\`\\n`;
+                    }
+                }
+
+                await ctx.reply(result || `No data found for ${query}`, { parse_mode: 'Markdown' });
+            } else {
+                await ctx.reply(`ℹ️ No results for \`${query}\``, { parse_mode: 'Markdown' });
+            }
+        } catch (error) {
+            console.error('[Whois] Error:', error);
+            await ctx.reply('❌ Whois lookup failed.');
         }
     });
 }
