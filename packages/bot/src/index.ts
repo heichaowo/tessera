@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { registerCommands } from './commands';
 import config from './config';
 import { rateLimitMiddleware, metricsMiddleware, getMetricsSummary } from './middleware';
+import { createRedisStorage } from './storage';
 
 /**
  * Session data for user state
@@ -41,9 +42,11 @@ export type BotContext = Context & SessionFlavor<SessionData>;
 export function createBot(): Bot<BotContext> {
     const bot = new Bot<BotContext>(config.telegramToken);
 
-    // Session middleware (in-memory for now, Redis upgrade available)
+    // Session middleware - use Redis if available, else in-memory
+    const redisStorage = createRedisStorage<SessionData>();
     bot.use(session({
         initial: (): SessionData => ({}),
+        storage: redisStorage || undefined,
     }));
 
     // Rate limiting middleware
