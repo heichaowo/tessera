@@ -2,7 +2,8 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
-import * as i18n from '../i18n/messages';
+
+const ERROR_NOT_LOGGED_IN = '❌ Please /login first\n请先登录';
 
 /**
  * Call agent API
@@ -67,7 +68,7 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
      */
     bot.command('community', async (ctx) => {
         if (!ctx.session.asn) {
-            await ctx.reply(i18n.ERROR_NOT_LOGGED_IN);
+            await ctx.reply(ERROR_NOT_LOGGED_IN);
             return;
         }
 
@@ -179,7 +180,7 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
      */
     bot.command('latency', async (ctx) => {
         if (!ctx.session.asn) {
-            await ctx.reply(i18n.ERROR_NOT_LOGGED_IN);
+            await ctx.reply(ERROR_NOT_LOGGED_IN);
             return;
         }
 

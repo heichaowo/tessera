@@ -2,13 +2,23 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
-import * as i18n from '../i18n/messages';
 import crypto from 'crypto';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+
+// Inline messages (previously from i18n)
+const MSG = {
+    LOGIN_ALREADY: (asn: number) => `✅ Already logged in as AS${asn}\\n已登录 AS${asn}`,
+    LOGIN_ASK_ASN: '🔐 Please enter your ASN:\\n请输入你的 ASN:\\n\\nExample: `4242420998`',
+    LOGIN_CHOOSE_METHOD: 'Choose authentication method:\\n选择认证方式:',
+    LOGIN_SUCCESS: (asn: number) => `✅ Login successful! Welcome AS${asn}\\n登录成功! 欢迎 AS${asn}`,
+    ERROR_INVALID_ASN: '❌ Invalid ASN. DN42 range: 4242420000-4242429999',
+    ERROR_NOT_LOGGED_IN: '❌ Please /login first\\n请先登录',
+    CANCELLED: '🚫 Cancelled\\n已取消',
+};
 
 const execAsync = promisify(exec);
 
@@ -47,13 +57,13 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         // Check if already logged in
         if (ctx.session.asn) {
             await ctx.reply(
-                i18n.fmt(i18n.LOGIN_ALREADY, { asn: ctx.session.asn }),
+                MSG.LOGIN_ALREADY(ctx.session.asn),
                 { parse_mode: 'Markdown' }
             );
             return;
         }
 
-        await ctx.reply(i18n.LOGIN_ASK_ASN, { parse_mode: 'Markdown' });
+        await ctx.reply(MSG.LOGIN_ASK_ASN, { parse_mode: 'Markdown' });
     });
 
     // Handle ASN input for login
@@ -74,7 +84,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         const asn = parseInt(asnMatch[1]);
 
         if (asn < 4242420000 || asn > 4242429999) {
-            await ctx.reply(i18n.ERROR_INVALID_ASN);
+            await ctx.reply(MSG.ERROR_INVALID_ASN);
             return;
         }
 
@@ -122,7 +132,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
             await ctx.reply(
                 `👤 *${person}* (AS${asn})\n\n` +
-                i18n.LOGIN_CHOOSE_METHOD,
+                MSG.LOGIN_CHOOSE_METHOD,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: keyboard,
@@ -230,7 +240,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         // Cancel
         if (text === '/cancel') {
             challengeStore.delete(userId);
-            await ctx.reply(i18n.CANCELLED);
+            await ctx.reply(MSG.CANCELLED);
             return;
         }
 
@@ -244,7 +254,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                     ctx.session.asn = asn;
                     ctx.session.person = `AS${asn}`;
                     await ctx.reply(
-                        i18n.fmt(i18n.LOGIN_SUCCESS, { mnt: `AS${asn}`, asn }),
+                        MSG.LOGIN_SUCCESS(asn),
                         { parse_mode: 'Markdown' }
                     );
                 } else {
@@ -259,7 +269,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                     ctx.session.asn = asn;
                     ctx.session.person = `AS${asn}`;
                     await ctx.reply(
-                        i18n.fmt(i18n.LOGIN_SUCCESS, { mnt: `AS${asn}`, asn }),
+                        MSG.LOGIN_SUCCESS(asn),
                         { parse_mode: 'Markdown' }
                     );
                 } else {
@@ -274,7 +284,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                     ctx.session.asn = asn;
                     ctx.session.person = `AS${asn}`;
                     await ctx.reply(
-                        i18n.fmt(i18n.LOGIN_SUCCESS, { mnt: `AS${asn}`, asn }),
+                        MSG.LOGIN_SUCCESS(asn),
                         { parse_mode: 'Markdown' }
                     );
                 } else {
@@ -309,7 +319,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
      */
     bot.command('whoami', async (ctx) => {
         if (!ctx.session.asn) {
-            await ctx.reply(i18n.ERROR_NOT_LOGGED_IN);
+            await ctx.reply(MSG.ERROR_NOT_LOGGED_IN);
             return;
         }
 
