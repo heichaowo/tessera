@@ -760,6 +760,28 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 statusText;
 
             await ctx.reply(successText, { parse_mode: 'Markdown' });
+
+            // Notify admin if not in admin mode
+            if (!flow.isAdminMode && config.adminChatId) {
+                try {
+                    const adminNotification =
+                        `🔔 *New Peer Request*\\n新的 Peer 申请\\n\\n` +
+                        `🆔 ASN: \`AS${asn}\`\\n` +
+                        `📍 Node: \`${flow.routerName}\`\\n` +
+                        `🌐 IPv6: \`${flow.ipv6}\`\\n` +
+                        `📡 Endpoint: ${flow.endpoint ? `\`${flow.endpoint}:${flow.port}\`` : 'NAT'}\\n\\n` +
+                        `Use /pending to review`;
+
+                    await ctx.api.sendMessage(config.adminChatId, adminNotification, {
+                        parse_mode: 'Markdown',
+                        reply_markup: new InlineKeyboard()
+                            .text('📋 View Pending', 'admin:pending')
+                    });
+                } catch (e) {
+                    console.error('[Notify Admin] Error:', e);
+                }
+            }
+
             ctx.session.peerFlow = undefined;
         } catch (error) {
             console.error('[Peer] Create error:', error);

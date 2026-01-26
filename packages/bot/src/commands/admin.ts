@@ -40,6 +40,17 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         await showPendingList(ctx);
     });
 
+    // Handle admin:pending callback (from notification)
+    bot.callbackQuery('admin:pending', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.answerCallbackQuery('❌ Admin only');
+            return;
+        }
+
+        await ctx.answerCallbackQuery();
+        await showPendingList(ctx);
+    });
+
     // Handle approve button
     bot.callbackQuery(/^approve:(.+)$/, async (ctx) => {
         if (!isAdmin(ctx)) {

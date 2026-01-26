@@ -10,6 +10,7 @@ export default {
 
     // Admin settings
     adminUsername: process.env.TELEGRAM_ADMIN_USERNAME || '',
+    adminChatId: process.env.TELEGRAM_ADMIN_CHAT_ID || '',  // Chat ID for admin notifications
     localAsn: Number(process.env.LOCAL_ASN) || 4242420998,
 
     // Agent settings
