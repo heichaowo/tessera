@@ -42,26 +42,64 @@ docker-compose up -d
 
 See `.env.example` for all available configuration options.
 
-Required:
+### Required
 
 - `TELEGRAM_BOT_TOKEN` - Telegram bot token from @BotFather
 - `DB_PASSWORD` - PostgreSQL password
 - `JWT_SECRET` - Secret for JWT tokens
+- `WEBHOOK_DOMAIN` - Domain for webhook (e.g. `bot.example.com`)
+- `WEBHOOK_SECRET` - Secret token for webhook validation
 
-Bot Agent Configuration (optional):
+### Bot Configuration
+
+- `TELEGRAM_ADMIN_USERNAME` - Admin username for notifications
+- `TELEGRAM_ADMIN_CHAT_ID` - Chat ID for admin alerts
+- `RATE_LIMIT_MAX` - Max requests per window (default: 20)
+- `RATE_LIMIT_WINDOW_MS` - Window in ms (default: 60000)
+- `REDIS_URL` - Redis URL for session persistence (optional)
+
+### Agent Configuration
 
 - `AGENT_HOSTS` - JSON map of node IDs to hostnames
 - `NODE_NAMES` - JSON map of node IDs to display names
+- `AGENT_TOKEN` - Bearer token for agent API
 
 ## Bot Commands
 
-| Category | Commands |
-|----------|----------|
-| User | /login, /logout, /whoami |
-| Peer | /peer, /info, /modify, /remove, /restart |
-| Tools | /ping, /tcping, /trace, /route, /path, /whois, /dig, /findnoc |
-| Admin | /approve, /reject, /block, /nodes |
-| Stats | /stats, /rank, /peerlist, /community, /latency |
+### User Commands
+
+| Command | Description |
+|---------|-------------|
+| `/start`, `/help` | Show all commands |
+| `/login` | Login with ASN |
+| `/logout`, `/whoami` | Session management |
+| `/peer` | Create new peer (wizard) |
+| `/info` | View your peers |
+| `/modify` | Modify peer settings |
+| `/remove` | Delete a peer |
+| `/status` | Check WG/BGP status |
+| `/restart` | Restart WG tunnel |
+| `/cancel` | Cancel current operation |
+
+### Network Tools
+
+| Command | Description |
+|---------|-------------|
+| `/ping` | Ping from nodes |
+| `/trace`, `/traceroute` | Traceroute |
+| `/whois` | DN42 whois lookup |
+| `/dig` | DNS lookup |
+| `/route`, `/path` | BGP route lookup |
+| `/findnoc` | Find NOC contact |
+
+### Admin Commands
+
+| Command | Description |
+|---------|-------------|
+| `/addpeer` | Add peer for user |
+| `/pending` | View pending approvals |
+| `/nodes` | List all nodes |
+| `/block` | Manage blocklist |
 
 ## API Endpoints
 
