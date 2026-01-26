@@ -547,6 +547,99 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 break;
             }
 
+            // Modify handlers
+            case 'modify_endpoint': {
+                const uuid = flow.routerUuid;
+                let endpoint: string | null = null;
+                let port: number | null = null;
+
+                if (text.toLowerCase() !== 'none') {
+                    // Parse endpoint:port
+                    if (text.includes(':')) {
+                        const parts = text.split(':');
+                        const lastPart = parts.pop();
+                        if (lastPart && /^\d+$/.test(lastPart)) {
+                            port = parseInt(lastPart, 10);
+                            endpoint = parts.join(':');
+                        } else {
+                            endpoint = text;
+                        }
+                    } else {
+                        endpoint = text;
+                    }
+                }
+
+                try {
+                    const result = await apiRequest('/session', 'POST', {
+                        action: 'update',
+                        uuid,
+                        endpoint,
+                        port,
+                    }, config.apiToken);
+
+                    if (result.code !== 0) {
+                        await ctx.reply(`❌ Failed: ${result.message}`);
+                    } else {
+                        await ctx.reply(`✅ Endpoint updated!\\n端点已更新`);
+                    }
+                } catch (e) {
+                    await ctx.reply('❌ Update failed');
+                }
+                ctx.session.peerFlow = undefined;
+                break;
+            }
+
+            case 'modify_pubkey': {
+                if (!isValidWgPubkey(text)) {
+                    await ctx.reply('❌ Invalid public key. Should be 44 chars ending with =');
+                    return;
+                }
+
+                try {
+                    const result = await apiRequest('/session', 'POST', {
+                        action: 'update',
+                        uuid: flow.routerUuid,
+                        publicKey: text,
+                    }, config.apiToken);
+
+                    if (result.code !== 0) {
+                        await ctx.reply(`❌ Failed: ${result.message}`);
+                    } else {
+                        await ctx.reply(`✅ Public key updated!\\n公钥已更新`);
+                    }
+                } catch (e) {
+                    await ctx.reply('❌ Update failed');
+                }
+                ctx.session.peerFlow = undefined;
+                break;
+            }
+
+            case 'modify_mtu': {
+                const mtu = parseInt(text, 10);
+                if (isNaN(mtu) || mtu < 1280 || mtu > 1500) {
+                    await ctx.reply('❌ Invalid MTU. Please enter 1280-1500.');
+                    return;
+                }
+
+                try {
+                    const result = await apiRequest('/session', 'POST', {
+                        action: 'update',
+                        uuid: flow.routerUuid,
+                        mtu,
+                    }, config.apiToken);
+
+                    if (result.code !== 0) {
+                        await ctx.reply(`❌ Failed: ${result.message}`);
+                    } else {
+                        await ctx.reply(`✅ MTU updated to ${mtu}!\\nMTU 已更新为 ${mtu}`);
+                    }
+                } catch (e) {
+                    await ctx.reply('❌ Update failed');
+                }
+                ctx.session.peerFlow = undefined;
+                break;
+            }
+
             default:
                 return next();
         }
@@ -708,11 +801,114 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        await ctx.reply(
-            '🔧 *Modify Peer*\\n\\n' +
-            'This feature is under development.',
-            { parse_mode: 'Markdown' }
+        try {
+            const result = await apiRequest('/session', 'POST', {
+                action: 'list',
+                asn: ctx.session.asn,
+            });
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Error: ${result.message}`);
+                return;
+            }
+
+            const sessions = result.data?.sessions || [];
+
+            if (sessions.length === 0) {
+                await ctx.reply('ℹ️ You have no peers to modify.\\n你没有可修改的 Peer');
+                return;
+            }
+
+            // Build selection keyboard
+            const keyboard = new InlineKeyboard();
+            sessions.forEach((s: { uuid: string; router: string; status: number }) => {
+                const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '❌';
+                keyboard.text(`${statusIcon} ${s.router}`, `modify:peer:${s.uuid}`).row();
+            });
+            keyboard.text('🚫 Cancel 取消', 'modify:cancel');
+
+            await ctx.reply(
+                `🔧 *Modify Peer*\\n修改 Peer\\n\\n` +
+                `Select peer to modify:\\n选择要修改的 Peer:`,
+                { parse_mode: 'Markdown', reply_markup: keyboard }
+            );
+        } catch (error) {
+            console.error('[Modify] Error:', error);
+            await ctx.reply('❌ Failed to fetch peers.');
+        }
+    });
+
+    /**
+     * Handle modify peer selection - show field selection
+     */
+    bot.callbackQuery(/^modify:peer:(.+)$/, async (ctx) => {
+        const uuid = ctx.match?.[1];
+        if (!uuid) return;
+
+        await ctx.answerCallbackQuery();
+
+        const keyboard = new InlineKeyboard()
+            .text('📡 Endpoint 端点', `modify:field:${uuid}:endpoint`).row()
+            .text('🔑 Public Key 公钥', `modify:field:${uuid}:pubkey`).row()
+            .text('📏 MTU', `modify:field:${uuid}:mtu`).row()
+            .text('🚫 Cancel 取消', 'modify:cancel');
+
+        await ctx.editMessageText(
+            `🔧 *Modify Peer*\\n修改 Peer\\n\\n` +
+            `Session: \`${uuid.slice(0, 8)}...\`\\n\\n` +
+            `Select field to modify:\\n选择要修改的字段:`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
         );
+    });
+
+    /**
+     * Handle modify field selection - prompt for new value
+     */
+    bot.callbackQuery(/^modify:field:(.+):(.+)$/, async (ctx) => {
+        const uuid = ctx.match?.[1];
+        const field = ctx.match?.[2];
+        if (!uuid || !field) return;
+
+        await ctx.answerCallbackQuery();
+
+        // Store modify state in peerFlow
+        ctx.session.peerFlow = {
+            step: `modify_${field}`,
+            routerUuid: uuid,
+        };
+
+        let promptText = '';
+        switch (field) {
+            case 'endpoint':
+                promptText = `📡 *Modify Endpoint*\\n\\n` +
+                    `Enter new endpoint (domain:port or IP:port):\\n` +
+                    `输入新端点 (域名:端口 或 IP:端口):\\n\\n` +
+                    `Example: \`tunnel.example.com:51820\`\\n` +
+                    `Or send "none" for no endpoint`;
+                break;
+            case 'pubkey':
+                promptText = `🔑 *Modify Public Key*\\n\\n` +
+                    `Enter new WireGuard public key:\\n` +
+                    `输入新的 WireGuard 公钥:\\n\\n` +
+                    `Format: 44 characters, ends with \`=\``;
+                break;
+            case 'mtu':
+                promptText = `📏 *Modify MTU*\\n\\n` +
+                    `Enter new MTU (1280-1500):\\n` +
+                    `输入新的 MTU (1280-1500):`;
+                break;
+        }
+
+        await ctx.editMessageText(promptText, { parse_mode: 'Markdown' });
+    });
+
+    /**
+     * Handle modify cancel
+     */
+    bot.callbackQuery('modify:cancel', async (ctx) => {
+        ctx.session.peerFlow = undefined;
+        await ctx.answerCallbackQuery('Cancelled');
+        await ctx.editMessageText('🚫 Modify cancelled.\\n已取消修改');
     });
 
     /**
@@ -724,11 +920,98 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        await ctx.reply(
-            '🗑️ *Remove Peer*\\n\\n' +
-            'This feature is under development.',
-            { parse_mode: 'Markdown' }
+        try {
+            const result = await apiRequest('/session', 'POST', {
+                action: 'list',
+                asn: ctx.session.asn,
+            });
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Error: ${result.message}`);
+                return;
+            }
+
+            const sessions = result.data?.sessions || [];
+
+            if (sessions.length === 0) {
+                await ctx.reply('ℹ️ You have no peers to remove.\\n你没有可删除的 Peer');
+                return;
+            }
+
+            // Build selection keyboard
+            const keyboard = new InlineKeyboard();
+            sessions.forEach((s: { uuid: string; router: string; status: number }) => {
+                const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '❌';
+                keyboard.text(`${statusIcon} ${s.router}`, `remove:select:${s.uuid}`).row();
+            });
+            keyboard.text('🚫 Cancel 取消', 'remove:cancel');
+
+            await ctx.reply(
+                `🗑️ *Remove Peer*\\n删除 Peer\\n\\n` +
+                `Select peer to remove:\\n选择要删除的 Peer:`,
+                { parse_mode: 'Markdown', reply_markup: keyboard }
+            );
+        } catch (error) {
+            console.error('[Remove] Error:', error);
+            await ctx.reply('❌ Failed to fetch peers.');
+        }
+    });
+
+    /**
+     * Handle remove selection
+     */
+    bot.callbackQuery(/^remove:select:(.+)$/, async (ctx) => {
+        const uuid = ctx.match?.[1];
+        if (!uuid) return;
+
+        await ctx.answerCallbackQuery();
+
+        const keyboard = new InlineKeyboard()
+            .text('✅ Confirm Delete 确认删除', `remove:confirm:${uuid}`)
+            .text('❌ Cancel 取消', 'remove:cancel');
+
+        await ctx.editMessageText(
+            `⚠️ *Confirm Deletion*\\n确认删除\\n\\n` +
+            `Are you sure you want to remove this peer?\\n` +
+            `确定要删除此 Peer 吗?\\n\\n` +
+            `Session: \`${uuid.slice(0, 8)}...\``,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
         );
+    });
+
+    /**
+     * Handle remove confirmation
+     */
+    bot.callbackQuery(/^remove:confirm:(.+)$/, async (ctx) => {
+        const uuid = ctx.match?.[1];
+        if (!uuid) return;
+
+        await ctx.answerCallbackQuery('Removing...');
+
+        try {
+            const result = await apiRequest('/session', 'POST', {
+                action: 'delete',
+                uuid,
+            }, config.apiToken);
+
+            if (result.code !== 0) {
+                await ctx.editMessageText(`❌ Failed to remove: ${result.message}`);
+                return;
+            }
+
+            await ctx.editMessageText('✅ Peer removed successfully!\\n成功删除 Peer!');
+        } catch (error) {
+            console.error('[Remove] Error:', error);
+            await ctx.editMessageText('❌ Failed to remove peer.');
+        }
+    });
+
+    /**
+     * Handle remove cancel
+     */
+    bot.callbackQuery('remove:cancel', async (ctx) => {
+        await ctx.answerCallbackQuery('Cancelled');
+        await ctx.editMessageText('🚫 Remove cancelled.\\n已取消删除');
     });
 
     /**
