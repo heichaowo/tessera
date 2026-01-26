@@ -82,6 +82,50 @@ function isValidWgPubkey(key: string): boolean {
 
 export function registerPeerCommands(bot: Bot<BotContext>) {
     /**
+     * /help - Show all available commands
+     */
+    bot.command(['help', 'start'], async (ctx) => {
+        const isAdmin = ctx.session.isAdmin === true ||
+            ctx.from?.username?.toLowerCase() === config.adminUsername?.toLowerCase().replace('@', '');
+
+        let helpText =
+            `🌐 *MoeNet DN42 Bot*\\n\\n` +
+            `*User Commands 用户命令:*\\n` +
+            `• /login - Login with ASN 登录\\n` +
+            `• /peer - Create new peer 创建 Peer\\n` +
+            `• /info - View your peers 查看 Peer 列表\\n` +
+            `• /modify - Modify peer 修改 Peer\\n` +
+            `• /remove - Remove peer 删除 Peer\\n` +
+            `• /status - WG/BGP status 状态查询\\n` +
+            `• /restart - Restart WG+BGP 重启\\n` +
+            `• /lg - Looking glass 路由查询\\n` +
+            `• /cancel - Cancel current operation 取消操作\\n`;
+
+        if (isAdmin) {
+            helpText += `\\n*Admin Commands 管理员命令:*\\n` +
+                `• /addpeer - Add peer for user\\n` +
+                `• /pending - Pending approvals\\n` +
+                `• /nodes - Node list\\n`;
+        }
+
+        helpText += `\\n📞 Contact: ${config.telegramContact || '@heicha'}`;
+
+        await ctx.reply(helpText, { parse_mode: 'Markdown' });
+    });
+
+    /**
+     * /cancel - Cancel current operation
+     */
+    bot.command('cancel', async (ctx) => {
+        if (ctx.session.peerFlow) {
+            ctx.session.peerFlow = undefined;
+            await ctx.reply('🚫 Operation cancelled.\\n已取消当前操作');
+        } else {
+            await ctx.reply('ℹ️ No active operation to cancel.\\n没有进行中的操作');
+        }
+    });
+
+    /**
      * /peer - Start peer creation wizard
      */
     bot.command('peer', async (ctx) => {
@@ -819,25 +863,51 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            const sessions = result.data?.sessions || [];
+            const sessions: Array<{ uuid: string; router: string; status: number; ipv6?: string; endpoint?: string }> = result.data?.sessions || [];
 
             if (sessions.length === 0) {
-                await ctx.reply('ℹ️ You have no peers.\\n你没有 Peer');
+                await ctx.reply(
+                    `📊 *Peer Info for AS${ctx.session.asn}*\\n\\n` +
+                    `You have no peers.\\n你没有 Peer\\n\\n` +
+                    `Use /peer to create one.`,
+                    { parse_mode: 'Markdown' }
+                );
                 return;
             }
 
             let message = `📊 *Peer Info for AS${ctx.session.asn}*\\n\\n`;
 
-            sessions.forEach((s, i) => {
-                const statusIcon = s.status === 1 ? '🟢 Active' : s.status === 3 ? '⏳ Pending' : '❌ Inactive';
-                message += `${i + 1}. ${statusIcon} @ ${s.router}\\n`;
-            });
+            for (const [i, s] of sessions.entries()) {
+                const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '❌';
+                const statusText = s.status === 1 ? 'Active' : s.status === 3 ? 'Pending' : 'Inactive';
 
-            await ctx.reply(message, { parse_mode: 'Markdown' });
+                message += `*${i + 1}. ${s.router}* ${statusIcon} ${statusText}\\n`;
+
+                if (s.ipv6) message += `   IPv6: \`${s.ipv6}\`\\n`;
+                if (s.endpoint) message += `   Endpoint: \`${s.endpoint}\`\\n`;
+                message += `\\n`;
+            }
+
+            const keyboard = new InlineKeyboard()
+                .text('🔄 Check Status', 'info:status')
+                .text('🔧 Modify', 'info:modify');
+
+            await ctx.reply(message, { parse_mode: 'Markdown', reply_markup: keyboard });
         } catch (error) {
             console.error('[Info] Error:', error);
             await ctx.reply('❌ Failed to fetch peer info.');
         }
+    });
+
+    // Handle info:status and info:modify callbacks
+    bot.callbackQuery('info:status', async (ctx) => {
+        await ctx.answerCallbackQuery('Use /status command');
+        await ctx.reply('Use /status to check WG/BGP status\\n使用 /status 查看状态');
+    });
+
+    bot.callbackQuery('info:modify', async (ctx) => {
+        await ctx.answerCallbackQuery('Use /modify command');
+        await ctx.reply('Use /modify to modify a peer\\n使用 /modify 修改 Peer');
     });
 
     /**
