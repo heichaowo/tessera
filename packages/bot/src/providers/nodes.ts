@@ -152,3 +152,11 @@ export async function refreshNodes(): Promise<void> {
     lastFetch = 0;
     await fetchNodes();
 }
+
+/**
+ * Get all node names as array
+ */
+export async function getAllNodes(): Promise<string[]> {
+    const nodes = await getNodes();
+    return Array.from(nodes.keys());
+}

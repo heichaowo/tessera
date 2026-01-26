@@ -1330,4 +1330,104 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             await ctx.reply('❌ Failed to check status.');
         }
     });
+
+    /**
+     * /lg - Looking Glass for route queries
+     * Usage: /lg <prefix> [node]
+     */
+    bot.command('lg', async (ctx) => {
+        const args = ctx.match?.trim().split(/\s+/) || [];
+
+        if (args.length === 0 || args[0] === '') {
+            await ctx.reply(
+                `🔍 *Looking Glass*\\n路由查询\\n\\n` +
+                `Usage 用法:\\n` +
+                `\`/lg <prefix>\` - 查询路由\\n` +
+                `\`/lg <prefix> <node>\` - 指定节点查询\\n\\n` +
+                `Example 示例:\\n` +
+                `\`/lg 172.20.0.0/14\`\\n` +
+                `\`/lg fd00::/8 hk-edge\``,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        const prefix = args[0] || '';
+        const nodeName = args[1];
+
+        await ctx.reply(`⏳ Looking up routes for \`${prefix}\`...`, { parse_mode: 'Markdown' });
+
+        try {
+            const { getAgentEndpoint, getAllNodes } = await import('../providers/nodes');
+            let nodes: string[] = [];
+
+            if (nodeName) {
+                nodes = [nodeName];
+            } else {
+                // Query first available node
+                const allNodes = await getAllNodes();
+                nodes = allNodes.slice(0, 1);
+            }
+
+            if (nodes.length === 0) {
+                await ctx.reply('❌ No nodes available');
+                return;
+            }
+
+            let resultMessage = `🔍 *Route Lookup: \`${prefix}\`*\\n\\n`;
+
+            for (const node of nodes) {
+                const endpoint = await getAgentEndpoint(node);
+                if (!endpoint) {
+                    resultMessage += `📍 *${node}*: ❌ Unreachable\\n\\n`;
+                    continue;
+                }
+
+                try {
+                    const response = await fetch(`${endpoint}/route/${encodeURIComponent(prefix)}`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${config.agentToken || ''}`,
+                        },
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json() as {
+                            routes?: Array<{
+                                network: string;
+                                via?: string;
+                                as_path?: string;
+                                best?: boolean;
+                            }>;
+                        };
+
+                        resultMessage += `📍 *${node}*\\n`;
+                        if (data.routes && data.routes.length > 0) {
+                            for (const route of data.routes.slice(0, 5)) {
+                                const best = route.best ? '★ ' : '  ';
+                                resultMessage += `${best}\`${route.network}\`\\n`;
+                                if (route.via) resultMessage += `    via ${route.via}\\n`;
+                                if (route.as_path) resultMessage += `    AS path: ${route.as_path}\\n`;
+                            }
+                            if (data.routes.length > 5) {
+                                resultMessage += `   ... and ${data.routes.length - 5} more\\n`;
+                            }
+                        } else {
+                            resultMessage += `   No routes found\\n`;
+                        }
+                    } else {
+                        resultMessage += `📍 *${node}*: ⚠️ Query failed\\n`;
+                    }
+                } catch (e) {
+                    resultMessage += `📍 *${node}*: ❌ Error\\n`;
+                }
+                resultMessage += `\\n`;
+            }
+
+            await ctx.reply(resultMessage, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('[LG] Error:', error);
+            await ctx.reply('❌ Route lookup failed.');
+        }
+    });
 }
