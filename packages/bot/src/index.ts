@@ -12,12 +12,22 @@ interface SessionData {
     isAdmin?: boolean;
     peerFlow?: {
         step: string;
-        router?: string;
-        endpoint?: string;
-        port?: string;
-        publicKey?: string;
-        ipv4?: string;
+        routerName?: string;
+        routerUuid?: string;
+        // Server-side WG info
+        serverEndpoint?: string;
+        serverPort?: number;
+        serverPubkey?: string;
+        serverLla?: string;
+        // User inputs
         ipv6?: string;
+        localIpv6?: string;
+        endpoint?: string;
+        port?: number;
+        publicKey?: string;
+        mtu?: number;
+        // Node map for selection
+        nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number }>;
     };
 }
 
