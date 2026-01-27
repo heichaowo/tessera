@@ -11,18 +11,18 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Telegram Bot                             │
 │                   (grammY + Hono.js + Bun)                      │
-│  • Session Management (Redis)                                    │
-│  • Rate Limiting                                                 │
-│  • Peer Creation Wizard                                          │
+│  • Session Management (Redis)                                   │
+│  • Rate Limiting                                                │
+│  • Peer Creation Wizard                                         │
 └─────────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Control Plane API                          │
 │                      (Hono.js + Bun)                            │
-│  • Authentication (GPG/SSH/Email)                                │
-│  • Session CRUD                                                  │
-│  • Admin Operations                                              │
+│  • Authentication (GPG/SSH/Email)                               │
+│  • Session CRUD                                                 │
+│  • Admin Operations                                             │
 └─────────────────────────────────────────────────────────────────┘
          │                        │                        │
          ▼                        ▼                        ▼
@@ -37,7 +37,7 @@
 ### moenet-core (Control Plane + Bot)
 
 | Component | Technology | Purpose |
-|-----------|------------|---------|
+| :--- | :--- | :--- |
 | API | Hono.js + Bun | REST API for agents and admin |
 | Bot | grammY + Bun | Telegram Bot for user interaction |
 | Database | PostgreSQL | Persistent storage |
@@ -46,7 +46,7 @@
 ### moenet-agent (Node Agent)
 
 | Component | Technology | Purpose |
-|-----------|------------|---------|
+| :--- | :--- | :--- |
 | Agent | Go | Manages BGP sessions on nodes |
 | BIRD 3.x | C | BGP routing daemon |
 | WireGuard | Kernel | Tunnel encryption |
@@ -55,7 +55,7 @@
 ### moenet-dn42-infra (Infrastructure)
 
 | Component | Technology | Purpose |
-|-----------|------------|---------|
+| :--- | :--- | :--- |
 | Ansible | Python | Configuration management |
 | Terraform | HCL | Infrastructure provisioning |
 | Wiki | Markdown | Documentation |
@@ -81,7 +81,7 @@ Admin → /pending → Approve → API → Database (status=QUEUED)
 ### Session Lifecycle
 
 | Status | Code | Description |
-|--------|------|-------------|
+| :--- | :--- | :--- |
 | DISABLED | 0 | Session disabled |
 | ACTIVE | 1 | Running normally |
 | ERROR | 2 | Has errors |
@@ -112,7 +112,7 @@ Admin → /pending → Approve → API → Database (status=QUEUED)
 ## Repositories
 
 | Repository | Description |
-|------------|-------------|
+| :--- | :--- |
 | [moenet-core](https://github.com/heichaowo/moenet-core) | Control Plane + Bot |
 | [moenet-agent](https://github.com/moenet/moenet-agent) | Go Node Agent |
 | [moenet-dn42-infra](https://github.com/heichaowo/moenet-dn42-infra) | Ansible + Terraform |

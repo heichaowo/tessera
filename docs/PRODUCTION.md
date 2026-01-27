@@ -21,36 +21,36 @@ docker compose up -d
 
 ## Services
 
-| Service | Port | Description |
-|---------|------|-------------|
-| `api` | 3000 | Hono.js REST API |
-| `bot` | 8443 | Telegram Bot (webhook) |
-| `postgres` | 5432 | PostgreSQL database |
-| `redis` | 6379 | Session/cache store |
-| `traefik` | 80/443 | Reverse proxy with TLS |
+| Service    | Port   | Description               |
+|------------|--------|---------------------------|
+| `api`      | 3000   | Hono.js REST API          |
+| `bot`      | 8443   | Telegram Bot (webhook)    |
+| `postgres` | 5432   | PostgreSQL database       |
+| `redis`    | 6379   | Session/cache store       |
+| `traefik`  | 80/443 | Reverse proxy with TLS    |
 
 ## Environment Variables
 
 ### Required
 
-| Variable | Description |
-|----------|-------------|
-| `DB_PASSWORD` | PostgreSQL password |
-| `JWT_SECRET` | Secret for JWT tokens |
-| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
-| `TELEGRAM_ADMIN_USERNAME` | Admin username for permissions |
-| `TELEGRAM_ADMIN_CHAT_ID` | Admin chat ID for notifications |
-| `WEBHOOK_DOMAIN` | Bot webhook domain |
-| `WEBHOOK_SECRET` | Webhook validation secret |
-| `AGENT_API_KEY` | Agent authentication key |
+| Variable                  | Description                     |
+|---------------------------|---------------------------------|
+| `DB_PASSWORD`             | PostgreSQL password             |
+| `JWT_SECRET`              | Secret for JWT tokens           |
+| `TELEGRAM_BOT_TOKEN`      | Bot token from @BotFather       |
+| `TELEGRAM_ADMIN_USERNAME` | Admin username for permissions  |
+| `TELEGRAM_ADMIN_CHAT_ID`  | Admin chat ID for notifications |
+| `WEBHOOK_DOMAIN`          | Bot webhook domain              |
+| `WEBHOOK_SECRET`          | Webhook validation secret       |
+| `AGENT_API_KEY`           | Agent authentication key        |
 
 ### Optional
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REDIS_URL` | `redis://moenet-redis:6379` | Redis connection |
-| `RATE_LIMIT_MAX` | `20` | Bot requests per minute |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window |
+| Variable               | Default                     | Description             |
+|------------------------|-----------------------------|-------------------------|
+| `REDIS_URL`            | `redis://moenet-redis:6379` | Redis connection        |
+| `RATE_LIMIT_MAX`       | `20`                        | Bot requests per minute |
+| `RATE_LIMIT_WINDOW_MS` | `60000`                     | Rate limit window       |
 
 ## Monitoring
 

@@ -76,7 +76,7 @@ All peering endpoints require authentication.
 
 **Headers:**
 
-```
+```http
 Authorization: Bearer <jwt-token>
 ```
 
@@ -219,7 +219,7 @@ Used by node agents. Requires agent token.
 
 **Headers:**
 
-```
+```http
 Authorization: Bearer <agent-token>
 ```
 
@@ -288,15 +288,15 @@ Returns Prometheus-format metrics.
 
 ## Error Codes
 
-| Code | Description |
-|------|-------------|
-| 400 | Bad request |
-| 401 | Unauthorized |
-| 403 | Forbidden (not admin) |
-| 404 | Resource not found |
-| 409 | Conflict (duplicate) |
-| 429 | Rate limited |
-| 500 | Internal error |
+| Code | Description            |
+|------|------------------------|
+| 400  | Bad request            |
+| 401  | Unauthorized           |
+| 403  | Forbidden (not admin)  |
+| 404  | Resource not found     |
+| 409  | Conflict (duplicate)   |
+| 429  | Rate limited           |
+| 500  | Internal error         |
 
 Error response format:
 
@@ -309,12 +309,12 @@ Error response format:
 
 ## Rate Limits
 
-| Route | Limit |
-|-------|-------|
+| Route      | Limit   |
+|------------|---------|
 | `/agent/*` | 300/min |
-| `/auth` | 60/min |
-| `/admin` | 30/min |
-| Default | 60/min |
+| `/auth`    | 60/min  |
+| `/admin`   | 30/min  |
+| Default    | 60/min  |
 
 Headers:
 
