@@ -297,6 +297,10 @@ async function handleGlobalHeartbeat(c: Context): Promise<Response> {
 /**
  * GET /agent/:router/mesh
  * Returns mesh peer configuration for WireGuard tunnel setup
+ * 
+ * Regional topology:
+ * - Intra-region: Full mesh (all nodes in same region connect to each other)
+ * - Inter-region: Only RRs connect to RRs in other regions
  */
 async function handleMesh(
     c: Context,
@@ -309,40 +313,64 @@ async function handleMesh(
     // Build self info from the requesting router
     const selfNodeId = routerRecord.get('nodeId') as number ?? 0;
     const selfNodeName = routerRecord.get('name') as string;
-    const selfNodeType = routerRecord.get('nodeType') as string ?? '';
+    const selfNodeType = routerRecord.get('nodeType') as string ?? 'client';
+    const selfRegionGroup = routerRecord.get('regionGroup') as string ?? '';
+    const selfIsRr = selfNodeType === 'rr' || selfNodeName.includes('-rr');
 
     const self = {
         nodeId: selfNodeId,
         nodeName: selfNodeName,
+        nodeType: selfNodeType,
+        regionGroup: selfRegionGroup,
         loopbackIpv4: routerRecord.get('dn42Loopback4') as string ?? '',
         loopbackIpv6: routerRecord.get('dn42Loopback6') as string ?? '',
-        isRr: selfNodeType === 'rr' || selfNodeName.includes('-rr'),
+        isRr: selfIsRr,
     };
 
     // Get all routers except the requesting one
-    const routers = await models.routers.findAll({
-        attributes: ['uuid', 'name', 'publicIp', 'meshPublicKey', 'region', 'nodeId', 'dn42Loopback4', 'dn42Loopback6', 'nodeType'],
+    const allRouters = await models.routers.findAll({
+        attributes: ['uuid', 'name', 'publicIp', 'meshPublicKey', 'region', 'nodeId',
+            'dn42Loopback4', 'dn42Loopback6', 'nodeType', 'regionGroup'],
         where: {
             uuid: { [Op.ne]: router },
         },
     });
 
-    const peers = routers.map((r: { get: (key: string) => unknown }) => {
-        const nodeName = r.get('name') as string;
-        const nodeType = r.get('nodeType') as string ?? '';
-        const nodeId = r.get('nodeId') as number ?? 0;
+    // Filter peers based on regional topology
+    const peers = allRouters
+        .map((r: { get: (key: string) => unknown }) => {
+            const nodeName = r.get('name') as string;
+            const nodeType = r.get('nodeType') as string ?? 'client';
+            const nodeId = r.get('nodeId') as number ?? 0;
+            const peerRegionGroup = r.get('regionGroup') as string ?? '';
+            const peerIsRr = nodeType === 'rr' || nodeName.includes('-rr');
 
-        return {
-            nodeId,
-            nodeName,
-            loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
-            loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
-            publicKey: r.get('meshPublicKey') as string ?? '',
-            endpoint: r.get('publicIp') ? `${r.get('publicIp')}:51820` : '',
-            mtu: 1420,
-            isRr: nodeType === 'rr' || nodeName.includes('-rr'),
-        };
-    });
+            return {
+                nodeId,
+                nodeName,
+                nodeType,
+                regionGroup: peerRegionGroup,
+                loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
+                loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
+                publicKey: r.get('meshPublicKey') as string ?? '',
+                endpoint: r.get('publicIp') ? `${r.get('publicIp')}:51820` : '',
+                mtu: 1420,
+                isRr: peerIsRr,
+            };
+        })
+        .filter((peer) => {
+            // Same region: always connect (intra-region full mesh)
+            if (peer.regionGroup === selfRegionGroup) {
+                return true;
+            }
+            // Different region: only RR-to-RR connections
+            // Self is RR and peer is RR = connect
+            if (selfIsRr && peer.isRr) {
+                return true;
+            }
+            // Client nodes don't connect to other regions
+            return false;
+        });
 
     return success(c, {
         self,
@@ -494,27 +522,43 @@ async function handleBirdConfig(
     // Get router-specific settings
     const nodeId = routerRecord.get('nodeId') as number ?? 0;
     const nodeName = routerRecord.get('name') as string;
-    const nodeType = routerRecord.get('nodeType') as string ?? 'edge';
+    const nodeType = routerRecord.get('nodeType') as string ?? 'client';
+    const regionGroup = routerRecord.get('regionGroup') as string ?? '';
     const bandwidth = routerRecord.get('bandwidth') as string ?? '1G';
     const regionCode = routerRecord.get('regionCode') as string ?? 'AS-E';
     const loopback4 = routerRecord.get('dn42Loopback4') as string ?? '';
     const loopback6 = routerRecord.get('dn42Loopback6') as string ?? '';
+    const selfIsRr = nodeType === 'rr' || nodeName.includes('-rr');
 
-    // Get iBGP peers (other routers for mesh)
-    const routers = await models.routers.findAll({
-        attributes: ['uuid', 'name', 'dn42Loopback4', 'dn42Loopback6', 'nodeId', 'nodeType'],
+    // Get all other routers for iBGP peer filtering
+    const allRouters = await models.routers.findAll({
+        attributes: ['uuid', 'name', 'dn42Loopback4', 'dn42Loopback6', 'nodeId', 'nodeType', 'regionGroup'],
         where: {
             uuid: { [Op.ne]: routerRecord.get('uuid') },
         },
     });
 
-    const ibgpPeers = routers.map((r: { get: (key: string) => unknown }) => ({
-        nodeId: r.get('nodeId') as number ?? 0,
-        nodeName: r.get('name') as string,
-        loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
-        loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
-        isRr: (r.get('nodeType') as string ?? '').includes('rr'),
-    }));
+    // Filter iBGP peers based on node type:
+    // - RR: connect to ALL other RRs (6 RR full mesh)
+    // - Client: connect only to RRs in same region
+    const ibgpPeers = allRouters
+        .map((r: { get: (key: string) => unknown }) => ({
+            nodeId: r.get('nodeId') as number ?? 0,
+            nodeName: r.get('name') as string,
+            nodeType: r.get('nodeType') as string ?? 'client',
+            regionGroup: r.get('regionGroup') as string ?? '',
+            loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
+            loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
+            isRr: (r.get('nodeType') as string ?? '') === 'rr' || (r.get('name') as string).includes('-rr'),
+        }))
+        .filter((peer) => {
+            if (selfIsRr) {
+                // RR connects to all other RRs (regardless of region)
+                return peer.isRr;
+            }
+            // Client connects only to RRs in same region
+            return peer.isRr && peer.regionGroup === regionGroup;
+        });
 
     // Build configuration hash for change detection
     const configHash = Bun.hash(JSON.stringify({

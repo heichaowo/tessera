@@ -18,7 +18,9 @@ export interface RouterAttributes {
     supportsIpv6: boolean;
     allowCnPeers: boolean;
     lastSeen: Date | null;
-    role: string | null;             // 'rr' or 'client'
+    role: string | null;             // Legacy: use nodeType instead
+    nodeType: string | null;         // 'rr' or 'client' for iBGP topology
+    regionGroup: string | null;      // 'apac', 'na', 'eu' for regional grouping
     bandwidth: string | null;        // Node bandwidth (e.g., '1G', '10G')
     regionCode: string | null;       // Region code for communities (e.g., 'AS-E', 'NA-W')
     bootstrapToken: string | null;   // Token for bootstrap script generation
@@ -119,6 +121,16 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
             allowNull: true,
         },
         role: {
+            type: DataTypes.STRING(10),
+            allowNull: true,
+        },
+        nodeType: {
+            field: 'node_type',
+            type: DataTypes.STRING(10),
+            allowNull: true,
+        },
+        regionGroup: {
+            field: 'region_group',
             type: DataTypes.STRING(10),
             allowNull: true,
         },
