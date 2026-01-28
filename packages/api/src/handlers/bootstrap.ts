@@ -26,6 +26,7 @@ export default async function bootstrapHandler(c: Context): Promise<Response> {
     const nodeId = router.get('nodeId') as number;
     const name = router.get('name') as string;
     const coreUrl = config.app.coreUrl || 'https://api.moenet.work';
+    const agentApiKey = config.auth.agentApiKey;
     const agentDownloadUrl = config.app.agentDownloadUrl || 'https://github.com/heichaowo/moenet-agent/releases/latest/download/moenet-agent-linux-amd64';
     const birdDownloadUrl = config.app.birdDownloadUrl || 'https://github.com/heichaowo/dn42-binaries/releases/latest/download/bird';
     const birdcDownloadUrl = config.app.birdcDownloadUrl || 'https://github.com/heichaowo/dn42-binaries/releases/latest/download/birdc';
@@ -203,7 +204,7 @@ cat > /opt/moenet-agent/config.json << 'AGENT_EOF'
   "bootstrap": {
     "apiUrl": "${coreUrl}",
     "nodeName": "${name}",
-    "token": "${token}"
+    "token": "${agentApiKey}"
   },
   "server": {
     "listen": ":24368"

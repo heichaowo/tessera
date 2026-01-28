@@ -191,4 +191,4 @@ See `.env.example` for all available configuration options.
 
 ## License
 
-MIT
+No License
