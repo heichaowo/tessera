@@ -193,6 +193,80 @@ User=root
 WantedBy=multi-user.target
 BIRD_EOF
 
+# Create minimal bird.conf for bootstrap (agent will sync full config later)
+cat > /etc/bird/bird.conf << 'BIRD_CONF_EOF'
+# MoeNet DN42 Bootstrap Configuration
+# Full config will be synced by agent
+
+log syslog all;
+router id 172.22.188.${nodeId};
+
+protocol device {
+    scan time 10;
+}
+
+protocol direct direct1 {
+    ipv4;
+    ipv6;
+    interface "dn42*", "dummy0", "lo";
+}
+
+# Static routes for our prefixes
+protocol static static_v4 {
+    ipv4;
+    route 172.22.188.0/26 unreachable;
+}
+
+protocol static static_v6 {
+    ipv6;
+    route fd00:4242:7777::/48 unreachable;
+}
+
+# Kernel protocol
+protocol kernel kernel1 {
+    ipv4 {
+        export filter {
+            if dest = RTD_UNREACHABLE then reject;
+            if net ~ [ 172.16.0.0/12+, 10.0.0.0/8+ ] then {
+                krt_prefsrc = 172.22.188.${nodeId};
+                accept;
+            }
+            reject;
+        };
+        import filter {
+            if net ~ [ 172.16.0.0/12+, 10.0.0.0/8+ ] then accept;
+            reject;
+        };
+    };
+}
+
+protocol kernel kernel2 {
+    ipv6 {
+        export filter {
+            if dest = RTD_UNREACHABLE then reject;
+            if net ~ [ fd00::/8+ ] then {
+                krt_prefsrc = fd00:4242:7777::${nodeId};
+                accept;
+            }
+            reject;
+        };
+        import filter {
+            if net ~ [ fd00::/8+ ] then accept;
+            reject;
+        };
+    };
+}
+
+# Peer configurations (empty for bootstrap)
+include "/etc/bird/peers/*.conf";
+include "/etc/bird/ibgp.d/*.conf";
+BIRD_CONF_EOF
+
+# Create empty include files to prevent BIRD errors
+touch /etc/bird/peers/.keep
+touch /etc/bird/ibgp.d/.keep
+chown -R root:root /etc/bird
+
 # Download Agent
 mkdir -p /opt/moenet-agent
 curl -L "${agentDownloadUrl}" -o /opt/moenet-agent/moenet-agent
@@ -216,7 +290,8 @@ AGENT_EOF
 cat > /etc/systemd/system/moenet-agent.service << 'AGENT_SERVICE_EOF'
 [Unit]
 Description=MoeNet Agent
-After=network.target
+After=network.target bird.service
+Requires=bird.service
 
 [Service]
 Type=simple
@@ -231,20 +306,33 @@ AGENT_SERVICE_EOF
 
 systemctl daemon-reload
 
-# Run agent bootstrap
+# Start BIRD first
 echo ""
-echo "=== Running Agent Bootstrap ==="
-cd /opt/moenet-agent && ./moenet-agent bootstrap
-
-# Enable and start services
+echo "=== Starting BIRD ==="
 systemctl enable bird
+systemctl start bird
+sleep 2
+
+# Verify BIRD is running
+if ! birdc show status > /dev/null 2>&1; then
+    echo "Warning: BIRD may not be fully started yet"
+fi
+
+# Enable and start agent
+echo ""
+echo "=== Starting Agent ==="
 systemctl enable moenet-agent
 systemctl start moenet-agent
 
 echo ""
 echo "=== Bootstrap Complete ==="
 echo "Node: ${name} (ID: ${nodeId})"
-echo "Agent service started. Check logs with: journalctl -u moenet-agent -f"
+echo "Loopback IPv4: 172.22.188.${nodeId}"
+echo "Loopback IPv6: fd00:4242:7777::${nodeId}"
+echo ""
+echo "Services started. Check logs with:"
+echo "  journalctl -u bird -f"
+echo "  journalctl -u moenet-agent -f"
 echo ""
 `;
 
