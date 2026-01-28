@@ -193,12 +193,12 @@ WantedBy=multi-user.target
 BIRD_EOF
 
 # Download Agent
-curl -L "${agentDownloadUrl}" -o /usr/local/bin/moenet-agent
-chmod +x /usr/local/bin/moenet-agent
+mkdir -p /opt/moenet-agent
+curl -L "${agentDownloadUrl}" -o /opt/moenet-agent/moenet-agent
+chmod +x /opt/moenet-agent/moenet-agent
 
 # Create agent config
-mkdir -p /etc/moenet-agent
-cat > /etc/moenet-agent/config.json << 'AGENT_EOF'
+cat > /opt/moenet-agent/config.json << 'AGENT_EOF'
 {
   "nodeId": ${nodeId},
   "coreUrl": "${coreUrl}",
@@ -214,7 +214,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/moenet-agent
+WorkingDirectory=/opt/moenet-agent
+ExecStart=/opt/moenet-agent/moenet-agent
 Restart=always
 RestartSec=5
 
@@ -227,7 +228,7 @@ systemctl daemon-reload
 # Run agent bootstrap
 echo ""
 echo "=== Running Agent Bootstrap ==="
-/usr/local/bin/moenet-agent bootstrap -c /etc/moenet-agent/config.json
+cd /opt/moenet-agent && ./moenet-agent bootstrap
 
 # Enable and start services
 systemctl enable bird
