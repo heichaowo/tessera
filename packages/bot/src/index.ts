@@ -34,7 +34,7 @@ interface SessionData {
         nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number }>;
     };
     nodeWizard?: {
-        step: 'name' | 'hostname' | 'ipv4' | 'ipv6' | 'role' | 'region' | 'location' | 'provider' | 'bandwidth' | 'max_peers' | 'allow_cn';
+        step: 'name' | 'hostname' | 'ipv4' | 'ipv6' | 'role' | 'region' | 'location' | 'provider' | 'bandwidth' | 'max_peers' | 'allow_cn' | 'confirm';
         data: Record<string, unknown>;
     };
 }

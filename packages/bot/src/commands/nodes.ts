@@ -41,7 +41,7 @@ function isAdmin(ctx: BotContext): boolean {
 
 // Node creation wizard state
 interface NodeWizardState {
-    step: 'name' | 'hostname' | 'ipv4' | 'ipv6' | 'role' | 'region' | 'location' | 'provider' | 'bandwidth' | 'max_peers' | 'allow_cn';
+    step: 'name' | 'hostname' | 'ipv4' | 'ipv6' | 'role' | 'region' | 'location' | 'provider' | 'bandwidth' | 'max_peers' | 'allow_cn' | 'confirm';
     data: Partial<NodeData>;
 }
 
@@ -217,7 +217,34 @@ export function registerNodeCommands(bot: Bot<BotContext>) {
                 }
                 wizard.data.allowCnPeers = text.toLowerCase() === 'yes';
 
-                // Complete wizard - create node
+                // Show confirmation summary
+                wizard.step = 'confirm';
+                const data = wizard.data;
+                await ctx.reply(
+                    `📋 *Confirm Node Creation 确认创建节点*\n\n` +
+                    `🏷️ Name: \`${data.name}\`\n` +
+                    `🌐 Hostname: \`${data.hostname}\`\n` +
+                    `📍 Public IP: \`${data.ipv4 || 'N/A'}\` / \`${data.ipv6 || 'N/A'}\`\n` +
+                    `👤 Role: \`${data.role}\`\n` +
+                    `🗺️ Region: \`${data.region}\`\n` +
+                    `📌 Location: \`${data.location}\`\n` +
+                    `🏢 Provider: \`${data.provider}\`\n` +
+                    `📶 Bandwidth: \`${data.bandwidth}\`\n` +
+                    `👥 Max Peers: \`${data.maxPeers}\`\n` +
+                    `🇨🇳 Allow CN: \`${data.allowCnPeers ? 'Yes' : 'No'}\`\n\n` +
+                    `_Type \`yes\` to confirm or /cancel to abort_\n` +
+                    `_输入 \`yes\` 确认创建，或 /cancel 取消_`,
+                    { parse_mode: 'Markdown' }
+                );
+                break;
+
+            case 'confirm':
+                if (text.toLowerCase() !== 'yes') {
+                    await ctx.reply('❌ Please type `yes` to confirm or /cancel to abort.\n请输入 `yes` 确认或 /cancel 取消。');
+                    return;
+                }
+
+                // Create node
                 await createNode(ctx, wizard.data as NodeData);
                 ctx.session.nodeWizard = undefined;
                 break;
