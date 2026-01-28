@@ -32,6 +32,10 @@ interface SessionData {
         psk?: string | null;
         nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number }>;
     };
+    nodeWizard?: {
+        step: 'name' | 'hostname' | 'ipv4' | 'ipv6' | 'role' | 'region' | 'location' | 'provider' | 'bandwidth' | 'max_peers' | 'allow_cn';
+        data: Record<string, unknown>;
+    };
 }
 
 export type BotContext = Context & SessionFlavor<SessionData>;

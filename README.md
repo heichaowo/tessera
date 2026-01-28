@@ -9,20 +9,19 @@ moenet-core/
 ├── packages/
 │   ├── api/              # Hono.js REST API
 │   │   └── src/
-│   │       ├── handlers/     # Agent, Auth, Peering, Admin
+│   │       ├── handlers/     # Agent, Auth, Peering, Admin, Bootstrap
 │   │       ├── db/           # Sequelize models
 │   │       └── providers/    # WHOIS
 │   │
 │   └── bot/              # grammY Telegram Bot
 │       └── src/
-│           ├── commands/     # User, Peer, Tools, Admin, Help
+│           ├── commands/     # User, Peer, Tools, Admin, Nodes, Help
 │           ├── middleware.ts # Rate limiting, Metrics
 │           ├── storage.ts    # Redis session adapter
-│           ├── i18n.ts       # Bilingual messages (EN/ZH)
-│           └── providers/    # Node provider
+│           └── i18n.ts       # Bilingual messages (EN/ZH)
 │
-├── docs/                 # Documentation
-└── docker-compose.yml
+├── prometheus.yml        # Prometheus scrape config
+└── docker-compose.yml    # Full stack deployment
 ```
 
 ## Quick Start
@@ -42,6 +41,15 @@ bun run dev
 docker compose up -d
 ```
 
+## Services
+
+| Service    | Port  | Domain               |
+|------------|-------|---------------------|
+| API        | 3000  | api.moenet.work     |
+| Bot        | 3001  | bot.moenet.work     |
+| Prometheus | 9090  | prom.moenet.work    |
+| Grafana    | 3002  | grafana.moenet.work |
+
 ## Environment Variables
 
 See `.env.example` for all available configuration options.
@@ -55,6 +63,7 @@ See `.env.example` for all available configuration options.
 | `JWT_SECRET` | Secret for JWT tokens |
 | `WEBHOOK_DOMAIN` | Domain for webhook (e.g. `bot.example.com`) |
 | `WEBHOOK_SECRET` | Secret token for webhook validation |
+| `GRAFANA_PASSWORD` | Grafana admin password |
 
 ### Bot Configuration
 
@@ -64,18 +73,7 @@ See `.env.example` for all available configuration options.
 | `TELEGRAM_ADMIN_CHAT_ID` | Chat ID for admin alerts | - |
 | `TELEGRAM_CONTACT` | Contact shown in help | `@heicha` |
 | `LOCAL_ASN` | Local network ASN | `4242420998` |
-| `RATE_LIMIT_MAX` | Max requests per window | `20` |
-| `RATE_LIMIT_WINDOW_MS` | Rate limit window (ms) | `60000` |
 | `REDIS_URL` | Redis URL for session persistence | (in-memory) |
-
-### Agent Configuration
-
-| Variable | Description |
-|----------|-------------|
-| `AGENT_HOSTS` | JSON map of node IDs to hostnames |
-| `NODE_NAMES` | JSON map of node IDs to display names |
-| `AGENT_TOKEN` | Bearer token for agent API |
-| `AGENT_PORT` | Agent API port (default: 8080) |
 
 ## Bot Commands
 
@@ -105,59 +103,43 @@ See `.env.example` for all available configuration options.
 | `/route <prefix>` | BGP route lookup |
 | `/findnoc <asn>` | Find NOC contact |
 
+### Node Management (Admin)
+
+| Command | Description |
+|---------|-------------|
+| `/addnode` | Add new node (interactive wizard) |
+| `/bootstrap <node>` | Generate bootstrap script for node |
+| `/delnode <node>` | Delete a node |
+| `/nodes` | List all nodes |
+
 ### Admin Commands
 
 | Command | Description |
 |---------|-------------|
 | `/addpeer` | Add peer for user |
 | `/pending` | View pending approvals |
-| `/nodes` | List all nodes |
 | `/block` | Manage blocklist |
 | `/main` | Maintenance mode |
 
-## Bot Features
-
-### Rate Limiting
-
-Per-user rate limiting with configurable window:
-
-- Default: 20 requests per 60 seconds
-- Configurable via `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_MS`
-
-### Session Persistence
-
-Redis-based session storage:
-
-- Sessions persist across bot restarts
-- 7-day TTL for inactive sessions
-- Falls back to in-memory if Redis unavailable
-
-### Metrics Endpoint
-
-`GET /metrics` returns:
-
-```json
-{
-  "uptime_seconds": 3600,
-  "total_requests": 1234,
-  "errors": 5,
-  "rate_limited": 10,
-  "top_commands": [{"command": "ping", "count": 100}]
-}
-```
-
 ## API Endpoints
+
+### Bootstrap API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/bootstrap/:token` | GET | Get bootstrap script (one-time token) |
 
 ### Agent API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/agent/:router/sessions` | GET | Get BGP sessions |
+| `/agent/:router/bird-config` | GET | Get BIRD policy config |
 | `/agent/:router/modify` | POST | Modify session |
 | `/agent/:router/report` | POST | Report metrics |
 | `/agent/:router/heartbeat` | POST | Agent heartbeat |
 | `/agent/:router/mesh` | GET | Get mesh peers |
-| `/agent/:router/config` | GET | Bootstrap config |
+| `/agent/:router/config` | GET | Full node config (for bootstrap) |
 
 ### Public API
 
@@ -168,6 +150,38 @@ Redis-based session storage:
 | `/admin` | POST | Admin operations |
 | `/health` | GET | Health check |
 | `/metrics` | GET | Prometheus metrics |
+
+## Bootstrap Flow
+
+```
+┌─────────────┐    /addnode     ┌─────────────┐
+│   Admin     │ ──────────────> │   Bot       │
+│  (Telegram) │                 │             │
+└─────────────┘                 └──────┬──────┘
+                                       │ Creates router + token
+                                       v
+┌─────────────┐    /bootstrap   ┌─────────────┐
+│   Admin     │ ──────────────> │   Bot       │
+│  (Telegram) │                 │             │
+└─────────────┘                 └──────┬──────┘
+                                       │ Returns: curl ... | bash
+                                       v
+┌─────────────┐    curl script  ┌─────────────┐
+│  New Server │ ──────────────> │   API       │
+│             │ <-------------- │ /bootstrap  │
+└──────┬──────┘   Shell Script  └─────────────┘
+       │
+       v  Runs bootstrap script
+┌─────────────┐
+│  Configured │ ── Agent starts ── Control Plane connected!
+│    Node     │
+└─────────────┘
+```
+
+## Monitoring
+
+- **Prometheus**: <http://prom.moenet.work> - Metrics collection
+- **Grafana**: <http://grafana.moenet.work> - Dashboards
 
 ## Documentation
 

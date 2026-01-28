@@ -98,6 +98,8 @@ export default async function agentHandler(c: Context): Promise<Response> {
             return await handleMeshStatus(c, routerUuid);
         case 'config':
             return await handleConfig(c, routerRecord);
+        case 'bird-config':
+            return await handleBirdConfig(c, routerRecord);
         case 'rtt':
             return await handleRtt(c, routerUuid);
         default:
@@ -465,4 +467,88 @@ async function handleRtt(c: Context, router: string): Promise<Response> {
         console.error(`[Agent ${router}] RTT storage error:`, error);
         return success(c, { received: true, warning: 'Redis unavailable, data not stored' });
     }
+}
+
+/**
+ * GET /agent/:router/bird-config
+ * Returns BIRD configuration parameters for agent to render templates
+ */
+async function handleBirdConfig(
+    c: Context,
+    // biome-ignore lint/suspicious/noExplicitAny: Sequelize model instance
+    routerRecord: any
+): Promise<Response> {
+    const models = getModels();
+
+    // Get default BIRD policy
+    const policy = await models.birdPolicies.findOne({
+        where: { isDefault: true },
+    });
+
+    if (!policy) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'No default BIRD policy configured');
+    }
+
+    const policyData = policy.get() as unknown as Record<string, unknown>;
+
+    // Get router-specific settings
+    const nodeId = routerRecord.get('nodeId') as number ?? 0;
+    const nodeName = routerRecord.get('name') as string;
+    const nodeType = routerRecord.get('nodeType') as string ?? 'edge';
+    const bandwidth = routerRecord.get('bandwidth') as string ?? '1G';
+    const regionCode = routerRecord.get('regionCode') as string ?? 'AS-E';
+    const loopback4 = routerRecord.get('dn42Loopback4') as string ?? '';
+    const loopback6 = routerRecord.get('dn42Loopback6') as string ?? '';
+
+    // Get iBGP peers (other routers for mesh)
+    const routers = await models.routers.findAll({
+        attributes: ['uuid', 'name', 'dn42Loopback4', 'dn42Loopback6', 'nodeId', 'nodeType'],
+        where: {
+            uuid: { [Op.ne]: routerRecord.get('uuid') },
+        },
+    });
+
+    const ibgpPeers = routers.map((r: { get: (key: string) => unknown }) => ({
+        nodeId: r.get('nodeId') as number ?? 0,
+        nodeName: r.get('name') as string,
+        loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
+        loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
+        isRr: (r.get('nodeType') as string ?? '').includes('rr'),
+    }));
+
+    // Build configuration hash for change detection
+    const configHash = Bun.hash(JSON.stringify({
+        policy: policyData,
+        nodeId,
+        bandwidth,
+        regionCode,
+        ibgpPeers: ibgpPeers.length,
+    })).toString(16);
+
+    return success(c, {
+        configHash,
+        node: {
+            id: nodeId,
+            name: nodeName,
+            type: nodeType,
+            bandwidth,
+            regionCode,
+            loopbackIpv4: loopback4,
+            loopbackIpv6: loopback6,
+        },
+        policy: {
+            dn42As: policyData.dn42As,
+            dn42Ipv4Prefix: policyData.dn42Ipv4Prefix,
+            dn42Ipv6Prefix: policyData.dn42Ipv6Prefix,
+            rpkiServers: policyData.rpkiServers,
+            ebgpImportLimit: policyData.ebgpImportLimit,
+            ebgpExportLimit: policyData.ebgpExportLimit,
+            ibgpImportLimit: policyData.ibgpImportLimit,
+            ibgpExportLimit: policyData.ibgpExportLimit,
+            asPathMaxLen: policyData.asPathMaxLen,
+            communities: policyData.communities,
+            largeCommunities: policyData.largeCommunities,
+        },
+        ibgpPeers,
+    });
 }

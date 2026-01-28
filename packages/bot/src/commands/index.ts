@@ -9,6 +9,7 @@ import { registerStatsCommands } from './stats';
 import { registerCommunityCommands } from './community';
 import { registerBlockCommands } from './block';
 import { registerMaintenanceCommands } from './maintenance';
+import { registerNodeCommands } from './nodes';
 
 /**
  * Register all bot commands
@@ -23,4 +24,6 @@ export function registerCommands(bot: Bot<BotContext>) {
     registerCommunityCommands(bot);
     registerBlockCommands(bot);
     registerMaintenanceCommands(bot);
+    registerNodeCommands(bot);
 }
+

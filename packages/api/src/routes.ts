@@ -4,8 +4,12 @@ import authHandler from './handlers/auth';
 import adminHandler from './handlers/admin';
 import peeringHandler from './handlers/peering';
 import metricsHandler from './handlers/metrics';
+import bootstrapHandler from './handlers/bootstrap';
 
 export function registerRoutes(app: Hono) {
+    // Bootstrap API (for node initialization)
+    app.get('/bootstrap/:token', bootstrapHandler);
+
     // Agent API (for Go agent communication)
     app.get('/api/v1/agent/:router/:action', agentHandler);
     app.post('/api/v1/agent/:router/:action', agentHandler);

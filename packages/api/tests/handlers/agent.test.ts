@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 
 // Mock the database context before importing handlers
 const mockBgpSessions = {
-    findAll: mock(() => Promise.resolve([])),
+    findAll: mock(() => Promise.resolve([] as unknown[])),
     findOne: mock(() => Promise.resolve(null)),
     create: mock(() => Promise.resolve({ get: () => ({}) })),
     update: mock(() => Promise.resolve([1])),
@@ -22,7 +22,7 @@ const mockRouters = {
     findAll: mock(() => Promise.resolve([])),
 };
 
-mock.module('../db/dbContext', () => ({
+mock.module('../../src/db/dbContext', () => ({
     getModels: () => ({
         bgpSessions: mockBgpSessions,
         routers: mockRouters,
@@ -33,7 +33,7 @@ mock.module('../db/dbContext', () => ({
 }));
 
 // Mock bcrypt helper
-mock.module('../common/helpers', () => ({
+mock.module('../../src/common/helpers', () => ({
     bcryptCompare: mock(async (expected: string, token: string) => {
         return token === 'valid-token';
     }),
@@ -42,7 +42,7 @@ mock.module('../common/helpers', () => ({
 }));
 
 // Mock config
-mock.module('../config', () => ({
+mock.module('../../src/config', () => ({
     default: {
         auth: {
             agentApiKey: 'test-key',
@@ -60,7 +60,7 @@ describe('Agent Handler', () => {
     });
 
     test('should reject requests without auth header', async () => {
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.get('/agent/:router/:action', agentHandler);
 
@@ -70,7 +70,7 @@ describe('Agent Handler', () => {
     });
 
     test('should reject requests with invalid token', async () => {
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.get('/agent/:router/:action', agentHandler);
 
@@ -104,7 +104,7 @@ describe('Agent Handler', () => {
             },
         ]));
 
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.get('/agent/:router/:action', agentHandler);
 
@@ -113,13 +113,13 @@ describe('Agent Handler', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = await res.json();
+        const body = await res.json() as { code: number; data: { bgpSessions: unknown } };
         expect(body.code).toBe(0);
         expect(body.data.bgpSessions).toBeDefined();
     });
 
     test('should handle modify action', async () => {
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.post('/agent/:router/:action', agentHandler);
 
@@ -139,7 +139,7 @@ describe('Agent Handler', () => {
     });
 
     test('should reject modify with missing uuid', async () => {
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.post('/agent/:router/:action', agentHandler);
 
@@ -156,7 +156,7 @@ describe('Agent Handler', () => {
     });
 
     test('should return 404 for unknown action', async () => {
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.get('/agent/:router/:action', agentHandler);
 
@@ -182,7 +182,7 @@ describe('Agent Heartbeat Handler', () => {
             }),
         }));
 
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.post('/agent/heartbeat', agentHandler);
 
@@ -208,7 +208,7 @@ describe('Agent Heartbeat Handler', () => {
     });
 
     test('should reject heartbeat without node_id', async () => {
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.post('/agent/heartbeat', agentHandler);
 
@@ -252,7 +252,7 @@ describe('Agent Config Handler', () => {
             }),
         }));
 
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.get('/agent/:router/:action', agentHandler);
 
@@ -261,7 +261,7 @@ describe('Agent Config Handler', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = await res.json();
+        const body = await res.json() as { code: number; data: { node: { name: string }; wireguard: unknown } };
         expect(body.code).toBe(0);
         expect(body.data.node).toBeDefined();
         expect(body.data.node.name).toBe('test-router');
@@ -313,7 +313,7 @@ describe('Agent Mesh Handler', () => {
             }),
         }));
 
-        const { default: agentHandler } = await import('../handlers/agent');
+        const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
         app.get('/agent/:router/:action', agentHandler);
 
@@ -322,7 +322,7 @@ describe('Agent Mesh Handler', () => {
         });
 
         expect(res.status).toBe(200);
-        const body = await res.json();
+        const body = await res.json() as { code: number; data: { self: unknown; peers: unknown[] } };
         expect(body.code).toBe(0);
         expect(body.data.self).toBeDefined();
         expect(body.data.peers).toBeDefined();

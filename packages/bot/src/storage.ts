@@ -21,7 +21,6 @@ function getRedisClient(): Redis | null {
         try {
             redisClient = new Redis(config.redisUrl, {
                 maxRetriesPerRequest: 3,
-                retryDelayOnFailover: 100,
                 lazyConnect: true,
             });
 

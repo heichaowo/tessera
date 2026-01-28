@@ -7,6 +7,7 @@ import { initRoutersModel, type RoutersModel } from './models/routers';
 import { initUsersModel, type UsersModel } from './models/users';
 import { initSettingsModel, type SettingsModel } from './models/settings';
 import { initAuditLogsModel, type AuditLogsModel } from './models/auditLogs';
+import { initBirdPoliciesModel, type BirdPoliciesModel } from './models/birdPolicies';
 
 let sequelize: Sequelize | null = null;
 
@@ -16,6 +17,7 @@ export interface Models {
     users: UsersModel;
     settings: SettingsModel;
     auditLogs: AuditLogsModel;
+    birdPolicies: BirdPoliciesModel;
 }
 
 let models: Models | null = null;
@@ -47,6 +49,7 @@ export async function initDatabase(): Promise<void> {
         users: initUsersModel(sequelize),
         settings: initSettingsModel(sequelize),
         auditLogs: initAuditLogsModel(sequelize),
+        birdPolicies: initBirdPoliciesModel(sequelize),
     };
 
     // Sync models (in development)

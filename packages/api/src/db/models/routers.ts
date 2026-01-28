@@ -13,13 +13,15 @@ export interface RouterAttributes {
     provider: string | null;
     dn42Loopback4: string | null;
     dn42Loopback6: string | null;
-    isOpen: boolean;
     maxPeers: number;
     supportsIpv4: boolean;
     supportsIpv6: boolean;
     allowCnPeers: boolean;
     lastSeen: Date | null;
-    nodeType: string | null;
+    role: string | null;             // 'rr' or 'client'
+    bandwidth: string | null;        // Node bandwidth (e.g., '1G', '10G')
+    regionCode: string | null;       // Region code for communities (e.g., 'AS-E', 'NA-W')
+    bootstrapToken: string | null;   // Token for bootstrap script generation
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -86,12 +88,7 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
             type: DataTypes.STRING,
             allowNull: true,
         },
-        isOpen: {
-            field: 'is_open',
-            type: DataTypes.BOOLEAN,
-            allowNull: false,
-            defaultValue: true,
-        },
+
         maxPeers: {
             field: 'max_peers',
             type: DataTypes.INTEGER,
@@ -121,10 +118,24 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
             type: DataTypes.DATE,
             allowNull: true,
         },
-        nodeType: {
-            field: 'node_type',
+        role: {
             type: DataTypes.STRING(10),
             allowNull: true,
+        },
+        bandwidth: {
+            type: DataTypes.STRING(10),
+            allowNull: true,
+        },
+        regionCode: {
+            field: 'region_code',
+            type: DataTypes.STRING(10),
+            allowNull: true,
+        },
+        bootstrapToken: {
+            field: 'bootstrap_token',
+            type: DataTypes.STRING(32),
+            allowNull: true,
+            unique: true,
         },
     }, {
         timestamps: true,

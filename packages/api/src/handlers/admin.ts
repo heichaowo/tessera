@@ -72,6 +72,12 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await enumRouters(c);
         case 'setRouter':
             return await setRouter(c, body);
+        case 'createRouter':
+            return await createRouter(c, body);
+        case 'getRouter':
+            return await getRouter(c, body);
+        case 'updateRouter':
+            return await updateRouter(c, body);
         case 'deleteRouter':
             return await deleteRouter(c, body);
         case 'enumSessions':
@@ -145,18 +151,133 @@ async function setRouter(c: Context, body: { type: string; router?: string; data
 }
 
 /**
- * Delete a router
+ * Create a new router (for /addnode command)
  */
-async function deleteRouter(c: Context, body: { router?: string }): Promise<Response> {
-    if (!body.router) {
-        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing router');
+interface CreateRouterBody {
+    name: string;
+    hostname?: string;
+    ipv4?: string | null;
+    ipv6?: string | null;
+    role?: string;
+    region: string;
+    location: string;
+    provider: string;
+    bandwidth: string;
+    maxPeers: number;
+    allowCnPeers: boolean;
+    bootstrapToken?: string;
+}
+
+async function createRouter(c: Context, body: CreateRouterBody): Promise<Response> {
+    if (!body.name || !body.region || !body.location) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing required fields');
+    }
+
+    const models = getModels();
+
+    // Generate next nodeId
+    const lastRouter = await models.routers.findOne({
+        order: [['node_id', 'DESC']],
+    });
+    const nextNodeId = ((lastRouter?.get('nodeId') as number) || 0) + 1;
+
+    try {
+        const router = await models.routers.create({
+            name: body.name,
+            location: body.location,
+            region: body.region,
+            publicIp: body.ipv4 || null,
+            publicIpv6: body.ipv6 || null,
+            role: body.role || 'client',
+            provider: body.provider || null,
+            bandwidth: body.bandwidth || null,
+            maxPeers: body.maxPeers || 20,
+            allowCnPeers: body.allowCnPeers ?? true,
+            bootstrapToken: body.bootstrapToken || null,
+            nodeId: nextNodeId,
+            supportsIpv4: !!body.ipv4,
+            supportsIpv6: !!body.ipv6,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
+
+        return success(c, {
+            message: 'Router created',
+            router: {
+                uuid: router.get('uuid'),
+                nodeId: router.get('nodeId'),
+                name: router.get('name'),
+            },
+        });
+    } catch (error) {
+        console.error('[Admin] Error creating router:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to create router');
+    }
+}
+
+/**
+ * Get a single router by name (for /bootstrap command)
+ */
+async function getRouter(c: Context, body: { name?: string }): Promise<Response> {
+    if (!body.name) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing name');
+    }
+
+    const models = getModels();
+    const router = await models.routers.findOne({
+        where: { name: body.name },
+    });
+
+    if (!router) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Router not found');
+    }
+
+    return success(c, { router: router.get() });
+}
+
+/**
+ * Update a router by name (for updating bootstrapToken)
+ */
+async function updateRouter(c: Context, body: { name?: string; updates?: Record<string, unknown> }): Promise<Response> {
+    if (!body.name || !body.updates) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing name or updates');
     }
 
     const models = getModels();
 
     try {
+        const [updated] = await models.routers.update(body.updates, {
+            where: { name: body.name },
+        });
+
+        if (!updated) {
+            return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Router not found');
+        }
+    } catch (error) {
+        console.error('[Admin] Error updating router:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to update router');
+    }
+
+    return success(c, { message: 'Router updated' });
+}
+
+/**
+ * Delete a router (supports both uuid and name)
+ */
+async function deleteRouter(c: Context, body: { router?: string; name?: string }): Promise<Response> {
+    const identifier = body.name || body.router;
+    if (!identifier) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing router or name');
+    }
+
+    const models = getModels();
+
+    // Check if it's a UUID or name
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+    const whereClause = isUuid ? { uuid: identifier } : { name: identifier };
+
+    try {
         const deleted = await models.routers.destroy({
-            where: { uuid: body.router },
+            where: whereClause,
         });
 
         if (!deleted) {

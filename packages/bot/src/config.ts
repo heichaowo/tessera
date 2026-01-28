@@ -7,6 +7,7 @@ export default {
     // API endpoint for moenet-core
     apiUrl: process.env.API_URL || 'http://localhost:3000',
     apiToken: process.env.API_TOKEN || '',
+    coreUrl: process.env.CORE_URL || 'https://api.moenet.work',
 
     // Admin settings
     adminUsername: process.env.TELEGRAM_ADMIN_USERNAME || '',

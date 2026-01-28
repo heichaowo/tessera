@@ -21,7 +21,7 @@ const mockRedis = {
     })),
 };
 
-mock.module('../db/redisContext', () => ({
+mock.module('../../src/db/redisContext', () => ({
     getRedis: () => mockRedis,
 }));
 
@@ -32,7 +32,7 @@ describe('Rate Limiter Middleware', () => {
     });
 
     test('should add rate limit headers', async () => {
-        const { rateLimiter } = await import('../middleware/rateLimiter');
+        const { rateLimiter } = await import('../../src/middleware/rateLimiter');
         const app = new Hono();
         app.use('*', rateLimiter());
         app.get('/auth', (c) => c.json({ ok: true }));
@@ -45,7 +45,7 @@ describe('Rate Limiter Middleware', () => {
     });
 
     test('should skip health endpoint', async () => {
-        const { rateLimiter } = await import('../middleware/rateLimiter');
+        const { rateLimiter } = await import('../../src/middleware/rateLimiter');
         const app = new Hono();
         app.use('*', rateLimiter());
         app.get('/health', (c) => c.json({ status: 'ok' }));
@@ -60,7 +60,7 @@ describe('Rate Limiter Middleware', () => {
     test('should skip rate limiting in standalone mode', async () => {
         process.env.STANDALONE = 'true';
 
-        const { rateLimiter } = await import('../middleware/rateLimiter');
+        const { rateLimiter } = await import('../../src/middleware/rateLimiter');
         const app = new Hono();
         app.use('*', rateLimiter());
         app.get('/auth', (c) => c.json({ ok: true }));
@@ -71,7 +71,7 @@ describe('Rate Limiter Middleware', () => {
     });
 
     test('should use different limits for agent routes', async () => {
-        const { rateLimiter } = await import('../middleware/rateLimiter');
+        const { rateLimiter } = await import('../../src/middleware/rateLimiter');
         const app = new Hono();
         app.use('*', rateLimiter());
         app.get('/agent/:router/sessions', (c) => c.json({ ok: true }));

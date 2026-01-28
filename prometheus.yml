@@ -1,0 +1,31 @@
+# MoeNet Prometheus Configuration
+# Scrape configuration for network monitoring
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # MoeNet Core API metrics
+  - job_name: 'moenet-api'
+    static_configs:
+      - targets: ['moenet-api:3000']
+    metrics_path: /api/v1/metrics
+
+  # Node agents (dynamically configured via file_sd or API)
+  # For now, static configuration - update with actual node IPs
+  # - job_name: 'moenet-agents'
+  #   static_configs:
+  #     - targets: ['node1:8080', 'node2:8080']
+  #   metrics_path: /metrics
+
+  # Example: Node Exporter on hosts (if deployed)
+  # - job_name: 'node-exporter'
+  #   file_sd_configs:
+  #     - files:
+  #       - '/etc/prometheus/nodes/*.yml'
