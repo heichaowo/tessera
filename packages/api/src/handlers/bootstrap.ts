@@ -227,7 +227,7 @@ systemctl daemon-reload
 # Run agent bootstrap
 echo ""
 echo "=== Running Agent Bootstrap ==="
-/usr/local/bin/moenet-agent bootstrap
+/usr/local/bin/moenet-agent bootstrap -c /etc/moenet-agent/config.json
 
 # Enable and start services
 systemctl enable bird
