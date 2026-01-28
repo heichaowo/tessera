@@ -200,9 +200,14 @@ chmod +x /opt/moenet-agent/moenet-agent
 # Create agent config
 cat > /opt/moenet-agent/config.json << 'AGENT_EOF'
 {
-  "nodeId": ${nodeId},
-  "coreUrl": "${coreUrl}",
-  "token": "${token}"
+  "bootstrap": {
+    "controlPlaneUrl": "${coreUrl}",
+    "nodeName": "${name}",
+    "token": "${token}"
+  },
+  "server": {
+    "listen": ":54321"
+  }
 }
 AGENT_EOF
 
