@@ -169,7 +169,7 @@ interface CreateRouterBody {
 }
 
 async function createRouter(c: Context, body: CreateRouterBody): Promise<Response> {
-    if (!body.name || !body.region || !body.location) {
+    if (!body.name || !body.location) {
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing required fields');
     }
 
@@ -181,22 +181,37 @@ async function createRouter(c: Context, body: CreateRouterBody): Promise<Respons
     });
     const nextNodeId = ((lastRouter?.get('nodeId') as number) || 0) + 1;
 
+    // Map region string to regionCode
+    const regionCodeMap: Record<string, number> = {
+        'AS-E': 101, 'AS-SE': 102, 'AS-S': 103, 'AS-N': 104,
+        'NA-E': 201, 'NA-C': 202, 'NA-W': 203, 'CA': 204, 'SA': 205,
+        'EU-W': 301, 'EU-C': 302, 'EU-E': 303,
+        'OC': 401, 'AF': 501, 'ME': 502,
+    };
+    const regionCode = regionCodeMap[body.region?.toUpperCase()] || 101;
+
+    // Map role to nodeType
+    const nodeType = body.role === 'rr' ? 'rr' : 'client';
+
     try {
         const router = await models.routers.create({
             name: body.name,
             location: body.location,
-            region: body.region,
             publicIp: body.ipv4 || null,
             publicIpv6: body.ipv6 || null,
-            role: body.role || 'client',
+            nodeType,
             provider: body.provider || null,
             bandwidth: body.bandwidth || null,
             maxPeers: body.maxPeers || 20,
             allowCnPeers: body.allowCnPeers ?? true,
             bootstrapToken: body.bootstrapToken || null,
             nodeId: nextNodeId,
+            regionCode,
             supportsIpv4: !!body.ipv4,
             supportsIpv6: !!body.ipv6,
+            // Auto-generate loopback IPs based on regionCode and nodeId
+            dn42Loopback4: `172.22.188.${nextNodeId}`,
+            dn42Loopback6: `fd00:4242:7777:${regionCode}:${nextNodeId}::1`,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any);
 
@@ -206,6 +221,9 @@ async function createRouter(c: Context, body: CreateRouterBody): Promise<Respons
                 uuid: router.get('uuid'),
                 nodeId: router.get('nodeId'),
                 name: router.get('name'),
+                regionCode: router.get('regionCode'),
+                loopback4: router.get('dn42Loopback4'),
+                loopback6: router.get('dn42Loopback6'),
             },
         });
     } catch (error) {
