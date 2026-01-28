@@ -97,7 +97,7 @@ echo "[4/7] Configuring firewall..."
 # IPv4 Rules
 iptables -A INPUT -p tcp --dport 179 -j ACCEPT -m comment --comment "Allow DN42 BGP"
 iptables -A INPUT -p udp --dport 51820:51829 -j ACCEPT -m comment --comment "Allow WireGuard Mesh"
-iptables -A INPUT -p tcp --dport 54321 -j ACCEPT -m comment --comment "Allow Agent API (Token auth)"
+iptables -A INPUT -p tcp --dport 24368 -j ACCEPT -m comment --comment "Allow Agent API (Token auth)"
 iptables -A INPUT -p icmp --icmp-type echo-request -j ACCEPT -m comment --comment "Allow Ping"
 iptables -A FORWARD -i dn42+ -o dn42+ -j ACCEPT -m comment --comment "Allow DN42 Forwarding"
 iptables -A INPUT -i dn42+ -j ACCEPT -m comment --comment "Allow DN42 Inbound"
@@ -106,7 +106,7 @@ iptables -A INPUT -p tcp --dport 5479 -j ACCEPT -m comment --comment "Allow Bird
 # IPv6 Rules
 ip6tables -A INPUT -p tcp --dport 179 -j ACCEPT -m comment --comment "Allow DN42 BGP IPv6"
 ip6tables -A INPUT -p udp --dport 51820:51829 -j ACCEPT -m comment --comment "Allow WireGuard Mesh IPv6"
-ip6tables -A INPUT -p tcp --dport 54321 -j ACCEPT -m comment --comment "Allow Agent API IPv6 (Token auth)"
+ip6tables -A INPUT -p tcp --dport 24368 -j ACCEPT -m comment --comment "Allow Agent API IPv6 (Token auth)"
 ip6tables -A INPUT -p icmpv6 -j ACCEPT -m comment --comment "Allow ICMPv6"
 ip6tables -A FORWARD -i dn42+ -o dn42+ -j ACCEPT -m comment --comment "Allow DN42 Forwarding IPv6"
 
@@ -201,12 +201,12 @@ chmod +x /opt/moenet-agent/moenet-agent
 cat > /opt/moenet-agent/config.json << 'AGENT_EOF'
 {
   "bootstrap": {
-    "controlPlaneUrl": "${coreUrl}",
+    "apiUrl": "${coreUrl}",
     "nodeName": "${name}",
     "token": "${token}"
   },
   "server": {
-    "listen": ":54321"
+    "listen": ":24368"
   }
 }
 AGENT_EOF
