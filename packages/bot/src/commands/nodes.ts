@@ -77,7 +77,8 @@ export function registerNodeCommands(bot: Bot<BotContext>) {
 
         await ctx.reply(
             '🖥️ *Add New Node 添加新节点*\n\n' +
-            'Step 1/11: Enter node name (e.g., `lax1-edge`):\n' +
+            '_Use /cancel at any step to cancel / 任意步骤输入 /cancel 可取消_\n\n' +
+            'Step 1/11: Enter node name (e.g., `ch1`):\n' +
             '请输入节点名称:',
             { parse_mode: 'Markdown' }
         );
@@ -93,6 +94,13 @@ export function registerNodeCommands(bot: Bot<BotContext>) {
         }
 
         const text = ctx.message.text.trim();
+
+        // Handle /cancel at any step
+        if (text === '/cancel') {
+            ctx.session.nodeWizard = undefined;
+            await ctx.reply('🚫 Node creation cancelled.\n已取消节点创建。');
+            return;
+        }
 
         switch (wizard.step) {
             case 'name':

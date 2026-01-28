@@ -98,6 +98,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             `👤 *Identity Confirmation 身份确认*\\n\\n` +
             `You are logged in as \`AS${asn}\`\\n` +
             `当前登录身份: \`AS${asn}\`\\n\\n` +
+            `_Use /cancel at any step to cancel / 任意步骤输入 /cancel 可取消_\\n\\n` +
             `Starting peer creation wizard...\\n` +
             `正在启动 Peer 创建向导...`,
             { parse_mode: 'Markdown' }
