@@ -4,7 +4,6 @@ export interface RouterAttributes {
     uuid: string;
     name: string;
     location: string;
-    region: string;
     publicIp: string | null;
     publicIpv6: string | null;
     wgPublicKey: string | null;
@@ -18,11 +17,10 @@ export interface RouterAttributes {
     supportsIpv6: boolean;
     allowCnPeers: boolean;
     lastSeen: Date | null;
-    role: string | null;             // Legacy: use nodeType instead
     nodeType: string | null;         // 'rr' or 'client' for iBGP topology
-    regionGroup: string | null;      // 'apac', 'na', 'eu' for regional grouping
     bandwidth: string | null;        // Node bandwidth (e.g., '1G', '10G')
-    regionCode: string | null;       // Region code for communities (e.g., 'AS-E', 'NA-W')
+    regionCode: number | null;       // Region code for communities (101=AS-E, 203=NA-W, 302=EU-C)
+    legacyLla: string | null;        // Legacy link-local address for existing peer connections
     bootstrapToken: string | null;   // Token for bootstrap script generation
     createdAt?: Date;
     updatedAt?: Date;
@@ -44,10 +42,6 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
         },
         location: {
             type: DataTypes.STRING,
-            allowNull: false,
-        },
-        region: {
-            type: DataTypes.STRING(10),
             allowNull: false,
         },
         publicIp: {
@@ -120,17 +114,8 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
             type: DataTypes.DATE,
             allowNull: true,
         },
-        role: {
-            type: DataTypes.STRING(10),
-            allowNull: true,
-        },
         nodeType: {
             field: 'node_type',
-            type: DataTypes.STRING(10),
-            allowNull: true,
-        },
-        regionGroup: {
-            field: 'region_group',
             type: DataTypes.STRING(10),
             allowNull: true,
         },
@@ -140,7 +125,12 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
         },
         regionCode: {
             field: 'region_code',
-            type: DataTypes.STRING(10),
+            type: DataTypes.INTEGER,
+            allowNull: true,
+        },
+        legacyLla: {
+            field: 'legacy_lla',
+            type: DataTypes.STRING(50),
             allowNull: true,
         },
         bootstrapToken: {
@@ -154,7 +144,7 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
         createdAt: 'created_at',
         updatedAt: 'updated_at',
         indexes: [
-            { fields: ['region'] },
+            { fields: ['region_code'] },
         ],
     });
 }

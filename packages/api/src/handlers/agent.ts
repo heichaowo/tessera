@@ -314,14 +314,14 @@ async function handleMesh(
     const selfNodeId = routerRecord.get('nodeId') as number ?? 0;
     const selfNodeName = routerRecord.get('name') as string;
     const selfNodeType = routerRecord.get('nodeType') as string ?? 'client';
-    const selfRegionGroup = routerRecord.get('regionGroup') as string ?? '';
+    const selfRegionCode = routerRecord.get('regionCode') as number ?? 0;
     const selfIsRr = selfNodeType === 'rr' || selfNodeName.includes('-rr');
 
     const self = {
         nodeId: selfNodeId,
         nodeName: selfNodeName,
         nodeType: selfNodeType,
-        regionGroup: selfRegionGroup,
+        regionCode: selfRegionCode,
         loopbackIpv4: routerRecord.get('dn42Loopback4') as string ?? '',
         loopbackIpv6: routerRecord.get('dn42Loopback6') as string ?? '',
         isRr: selfIsRr,
@@ -329,8 +329,8 @@ async function handleMesh(
 
     // Get all routers except the requesting one
     const allRouters = await models.routers.findAll({
-        attributes: ['uuid', 'name', 'publicIp', 'meshPublicKey', 'region', 'nodeId',
-            'dn42Loopback4', 'dn42Loopback6', 'nodeType', 'regionGroup'],
+        attributes: ['uuid', 'name', 'publicIp', 'meshPublicKey', 'nodeId',
+            'dn42Loopback4', 'dn42Loopback6', 'nodeType', 'regionCode'],
         where: {
             uuid: { [Op.ne]: router },
         },
@@ -342,14 +342,14 @@ async function handleMesh(
             const nodeName = r.get('name') as string;
             const nodeType = r.get('nodeType') as string ?? 'client';
             const nodeId = r.get('nodeId') as number ?? 0;
-            const peerRegionGroup = r.get('regionGroup') as string ?? '';
+            const peerRegionCode = r.get('regionCode') as number ?? 0;
             const peerIsRr = nodeType === 'rr' || nodeName.includes('-rr');
 
             return {
                 nodeId,
                 nodeName,
                 nodeType,
-                regionGroup: peerRegionGroup,
+                regionCode: peerRegionCode,
                 loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
                 loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
                 publicKey: r.get('meshPublicKey') as string ?? '',
@@ -360,7 +360,7 @@ async function handleMesh(
         })
         .filter((peer) => {
             // Same region: always connect (intra-region full mesh)
-            if (peer.regionGroup === selfRegionGroup) {
+            if (peer.regionCode === selfRegionCode) {
                 return true;
             }
             // Different region: only RR-to-RR connections
@@ -523,16 +523,15 @@ async function handleBirdConfig(
     const nodeId = routerRecord.get('nodeId') as number ?? 0;
     const nodeName = routerRecord.get('name') as string;
     const nodeType = routerRecord.get('nodeType') as string ?? 'client';
-    const regionGroup = routerRecord.get('regionGroup') as string ?? '';
+    const regionCode = routerRecord.get('regionCode') as number ?? 0;
     const bandwidth = routerRecord.get('bandwidth') as string ?? '1G';
-    const regionCode = routerRecord.get('regionCode') as string ?? 'AS-E';
     const loopback4 = routerRecord.get('dn42Loopback4') as string ?? '';
     const loopback6 = routerRecord.get('dn42Loopback6') as string ?? '';
     const selfIsRr = nodeType === 'rr' || nodeName.includes('-rr');
 
     // Get all other routers for iBGP peer filtering
     const allRouters = await models.routers.findAll({
-        attributes: ['uuid', 'name', 'dn42Loopback4', 'dn42Loopback6', 'nodeId', 'nodeType', 'regionGroup'],
+        attributes: ['uuid', 'name', 'dn42Loopback4', 'dn42Loopback6', 'nodeId', 'nodeType', 'regionCode'],
         where: {
             uuid: { [Op.ne]: routerRecord.get('uuid') },
         },
@@ -546,7 +545,7 @@ async function handleBirdConfig(
             nodeId: r.get('nodeId') as number ?? 0,
             nodeName: r.get('name') as string,
             nodeType: r.get('nodeType') as string ?? 'client',
-            regionGroup: r.get('regionGroup') as string ?? '',
+            regionCode: r.get('regionCode') as number ?? 0,
             loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
             loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
             isRr: (r.get('nodeType') as string ?? '') === 'rr' || (r.get('name') as string).includes('-rr'),
@@ -557,7 +556,7 @@ async function handleBirdConfig(
                 return peer.isRr;
             }
             // Client connects only to RRs in same region
-            return peer.isRr && peer.regionGroup === regionGroup;
+            return peer.isRr && peer.regionCode === regionCode;
         });
 
     // Build configuration hash for change detection
