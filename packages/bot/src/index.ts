@@ -12,6 +12,7 @@ interface SessionData {
     asn?: number;
     person?: string;
     isAdmin?: boolean;
+    awaitingAsn?: boolean;
     peerFlow?: {
         step: string;
         isAdminMode?: boolean;

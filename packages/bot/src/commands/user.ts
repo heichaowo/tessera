@@ -63,22 +63,32 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             return;
         }
 
+        // Mark that we're awaiting ASN input
+        ctx.session.awaitingAsn = true;
         await ctx.reply(MSG.LOGIN_ASK_ASN, { parse_mode: 'Markdown' });
     });
 
-    // Handle ASN input for login
+    // Handle ASN input for login - ONLY when awaiting ASN
     bot.on('message:text', async (ctx, next) => {
-        // Check if waiting for ASN input
-        if (ctx.session.asn || ctx.message.text.startsWith('/')) {
+        // Only process if explicitly awaiting ASN input
+        if (!ctx.session.awaitingAsn) {
             return next();
         }
 
         const text = ctx.message.text.trim();
 
+        // Cancel
+        if (text === '/cancel') {
+            ctx.session.awaitingAsn = false;
+            await ctx.reply(MSG.CANCELLED);
+            return;
+        }
+
         // Check if it looks like an ASN
         const asnMatch = text.match(/^(?:AS)?(\d+)$/i);
         if (!asnMatch?.[1]) {
-            return next();
+            await ctx.reply(MSG.ERROR_INVALID_ASN);
+            return;
         }
 
         const asn = parseInt(asnMatch[1]);
@@ -87,6 +97,9 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             await ctx.reply(MSG.ERROR_INVALID_ASN);
             return;
         }
+
+        // Clear awaiting flag
+        ctx.session.awaitingAsn = false;
 
         // Query auth methods from API
         try {
