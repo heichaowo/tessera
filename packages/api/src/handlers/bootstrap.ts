@@ -166,7 +166,8 @@ echo "[7/7] Installing BIRD3 and Agent..."
 # Create bird user
 useradd -r -s /usr/sbin/nologin bird 2>/dev/null || true
 
-# Create directories
+# Clean old configs and create directories
+rm -rf /etc/bird/peers/* /etc/bird/ibgp.d/* 2>/dev/null || true
 mkdir -p /etc/bird/peers /etc/bird/ibgp.d /var/run/bird/run
 chown -R bird:bird /etc/bird /var/run/bird
 
