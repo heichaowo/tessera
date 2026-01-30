@@ -44,8 +44,8 @@ export default {
     app: {
         coreUrl: process.env.CORE_URL || 'https://api.moenet.work',
         agentDownloadUrl: process.env.AGENT_DOWNLOAD_URL || 'https://github.com/heichaowo/moenet-agent/releases/latest/download/moenet-agent-linux-amd64',
-        birdDownloadUrl: process.env.BIRD_DOWNLOAD_URL || 'https://github.com/heichaowo/dn42-binaries/releases/latest/download/bird',
-        birdcDownloadUrl: process.env.BIRDC_DOWNLOAD_URL || 'https://github.com/heichaowo/dn42-binaries/releases/latest/download/birdc',
+        birdDownloadUrl: process.env.BIRD_DOWNLOAD_URL || 'https://github.com/heichaowo/moenet-dn42-binaries/releases/latest/download/bird',
+        birdcDownloadUrl: process.env.BIRDC_DOWNLOAD_URL || 'https://github.com/heichaowo/moenet-dn42-binaries/releases/latest/download/birdc',
     },
 
     features: {
