@@ -151,6 +151,77 @@ See `.env.example` for all available configuration options.
 | `/health` | GET | Health check |
 | `/metrics` | GET | Prometheus metrics |
 
+## BGP Communities
+
+### ✅ Accepted at Node
+
+**Format:** `4242420998:100:<NodeID>`
+
+| Community | Location | Node |
+| :--- | :--- | :--- |
+| `4242420998:100:1` | Tokyo, JP | JP1 |
+| `4242420998:100:2` | Tokyo, JP | JP2 |
+| `4242420998:100:3` | Hong Kong, HK | HK1 |
+| `4242420998:100:4` | Hong Kong, HK | HK2 |
+| `4242420998:100:21` | Los Angeles, US | US1 |
+| `4242420998:100:22` | Los Angeles, US | US2 |
+| `4242420998:100:23` | Bern, CH | CH |
+
+### ❌ Rejected Routes
+
+**Format:** `4242420998:150:<ReasonID>`
+
+| Community | Reason |
+| :--- | :--- |
+| `4242420998:150:1` | Self route |
+| `4242420998:150:2` | Invalid prefix |
+| `4242420998:150:3` | ROA invalid |
+| `4242420998:150:4` | Long AS path |
+| `4242420998:150:5` | Blocked ASN |
+
+### DN42 Standard Communities
+
+**Latency** `(64511, 1-9)`
+
+| Community | RTT |
+| :--- | :--- |
+| `(64511, 1)` | < 2.7ms |
+| `(64511, 2)` | < 7.3ms |
+| `(64511, 3)` | < 20ms |
+| `(64511, 4)` | < 55ms |
+| `(64511, 5)` | < 148ms |
+| `(64511, 6)` | < 403ms |
+| `(64511, 7)` | < 1097ms |
+| `(64511, 8)` | < 2981ms |
+| `(64511, 9)` | >= 2981ms |
+
+**Bandwidth** `(64511, 21-25)`
+
+| Community | Bandwidth |
+| :--- | :--- |
+| `(64511, 21)` | >= 100 Mbps |
+| `(64511, 22)` | >= 10 Gbps |
+| `(64511, 23)` | >= 1 Gbps |
+| `(64511, 24)` | >= 100 Kbps |
+| `(64511, 25)` | >= 10 Mbps |
+
+**Encryption** `(64511, 31-34)`
+
+| Community | Type |
+| :--- | :--- |
+| `(64511, 31)` | None |
+| `(64511, 32)` | Unsafe |
+| `(64511, 33)` | Encrypted (WireGuard) |
+| `(64511, 34)` | Encrypted (Latency-critical) |
+
+**Region** `(64511, 41-53)`
+
+| Community | Region |
+| :--- | :--- |
+| `(64511, 41)` | Europe |
+| `(64511, 50)` | Asia - East |
+| `(64511, 51)` | Oceania |
+
 ## Bootstrap Flow
 
 ```
