@@ -10,6 +10,23 @@ import config from '../config';
 import { PeeringStatus, type BgpSessionAttributes } from '../db/models/bgpSessions';
 
 /**
+ * Derive link-local address from loopback IPv6
+ * Loopback format: fd00:4242:7777:{region}:{local_index}::1
+ * LLA format: fe80::998:{region}:{local_index}:1
+ */
+function deriveLLAFromLoopback(loopback: string): string {
+    if (!loopback) return 'fe80::998:0:0:1';
+    // Parse loopback like "fd00:4242:7777:302:1::1"
+    const parts = loopback.split(':');
+    if (parts.length < 5) return 'fe80::998:0:0:1';
+    // parts[3] = region (e.g., "302")
+    // parts[4] = local_index (e.g., "1")
+    const region = parts[3] || '0';
+    const localIndex = parts[4] || '0';
+    return `fe80::998:${region}:${localIndex}:1`;
+}
+
+/**
  * Verify agent API key (simple token comparison)
  */
 async function verifyAgentApiKey(c: Context, _router: string): Promise<boolean> {
@@ -445,7 +462,8 @@ async function handleConfig(
             persistentKeepaliveInterval: 25,
             dn42Ipv4: routerRecord.get('dn42Loopback4') as string ?? '',
             dn42Ipv6: routerRecord.get('dn42Loopback6') as string ?? '',
-            dn42Ipv6LinkLocal: `fe80::998:${routerRecord.get('nodeId') ?? 1}`,
+            // Derive LLA from loopback: fd00:4242:7777:{region}:{local_index}::1 -> fe80::998:{region}:{local_index}:1
+            dn42Ipv6LinkLocal: deriveLLAFromLoopback(routerRecord.get('dn42Loopback6') as string ?? ''),
         },
         metric: {
             pingTimeout: 5,
