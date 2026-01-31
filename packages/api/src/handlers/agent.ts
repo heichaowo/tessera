@@ -284,6 +284,14 @@ async function handleGlobalHeartbeat(c: Context): Promise<Response> {
         console.log(`[Agent ${nodeId}] Updated meshPublicKey: ${status.meshPublicKey.substring(0, 20)}...`);
     }
 
+    // Update public IPs if provided
+    if (status.publicIpv4) {
+        updatePayload.ipv4 = status.publicIpv4;
+    }
+    if (status.publicIpv6) {
+        updatePayload.ipv6 = status.publicIpv6;
+    }
+
     await models.routers.update(updatePayload, { where: { name: nodeId } });
 
     console.log(`[Agent ${nodeId}] Heartbeat: load=${status.loadAvg}, uptime=${status.uptime}s`);
