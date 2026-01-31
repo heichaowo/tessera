@@ -27,6 +27,87 @@ function deriveLLAFromLoopback(loopback: string): string {
 }
 
 /**
+ * Map regionCode to continent and subregion LC constants
+ * RegionCode format: 1xx=Asia, 2xx=NA, 3xx=EU, 4xx=OC, 5xx=Other
+ */
+function getRegionLCs(regionCode: number): { continentLc: string; subregionLc: string } {
+    const subregionMap: Record<number, string> = {
+        101: 'LC_REGION_AS_E',   // East Asia
+        102: 'LC_REGION_AS_SE',  // Southeast Asia
+        103: 'LC_REGION_AS_S',   // South Asia
+        104: 'LC_REGION_AS_N',   // North Asia
+        201: 'LC_REGION_NA_E',   // North America East
+        202: 'LC_REGION_NA_C',   // North America Central
+        203: 'LC_REGION_NA_W',   // North America West
+        204: 'LC_REGION_CA',     // Central America
+        205: 'LC_REGION_SA',     // South America
+        301: 'LC_REGION_EU_W',   // Europe West
+        302: 'LC_REGION_EU_C',   // Europe Central
+        303: 'LC_REGION_EU_E',   // Europe East
+        401: 'LC_REGION_OC',     // Oceania
+        501: 'LC_REGION_AF',     // Africa
+        502: 'LC_REGION_ME',     // Middle East
+    };
+
+    const continentMap: Record<number, string> = {
+        1: 'LC_ORIGIN_AS',
+        2: 'LC_ORIGIN_NA',
+        3: 'LC_ORIGIN_EU',
+        4: 'LC_ORIGIN_OC',
+        5: 'LC_ORIGIN_OTHER',
+    };
+
+    const continent = Math.floor(regionCode / 100);
+    return {
+        continentLc: continentMap[continent] || 'LC_ORIGIN_AS',
+        subregionLc: subregionMap[regionCode] || 'LC_REGION_AS_E',
+    };
+}
+
+/**
+ * Map regionCode to DN42 region community constant name
+ */
+function getRegionCommunity(regionCode: number): string {
+    const regionMap: Record<number, string> = {
+        101: 'DN42_REGION_AS_E',   // East Asia
+        102: 'DN42_REGION_AS_SE',  // Southeast Asia
+        103: 'DN42_REGION_AS_S',   // South Asia
+        104: 'DN42_REGION_AS_N',   // North Asia
+        201: 'DN42_REGION_NA_E',   // North America East
+        202: 'DN42_REGION_NA_C',   // North America Central
+        203: 'DN42_REGION_NA_W',   // North America West
+        204: 'DN42_REGION_CA',     // Central America
+        205: 'DN42_REGION_SA',     // South America
+        301: 'DN42_REGION_EU',     // Europe (DN42 uses single EU)
+        302: 'DN42_REGION_EU',     // Europe
+        303: 'DN42_REGION_EU',     // Europe
+        401: 'DN42_REGION_OC',     // Oceania
+        501: 'DN42_REGION_AF',     // Africa
+        502: 'DN42_REGION_ME',     // Middle East
+    };
+    return regionMap[regionCode] || 'DN42_REGION_AS_E';
+}
+
+/**
+ * Map bandwidth string to DN42 bandwidth community constant name
+ */
+function getBandwidthCommunity(bandwidth: string): string {
+    const bwMap: Record<string, string> = {
+        '10G': 'DN42_BW_10G_PLUS',
+        '5G': 'DN42_BW_1G_PLUS',
+        '2G': 'DN42_BW_1G_PLUS',
+        '1G': 'DN42_BW_1G_PLUS',
+        '500M': 'DN42_BW_100M_PLUS',
+        '200M': 'DN42_BW_100M_PLUS',
+        '100M': 'DN42_BW_100M_PLUS',
+        '50M': 'DN42_BW_10M_PLUS',
+        '10M': 'DN42_BW_10M_PLUS',
+        '100K': 'DN42_BW_100K_PLUS',
+    };
+    return bwMap[bandwidth?.toUpperCase()] || 'DN42_BW_1G_PLUS';
+}
+
+/**
  * Verify agent API key (simple token comparison)
  */
 async function verifyAgentApiKey(c: Context, _router: string): Promise<boolean> {
@@ -597,6 +678,8 @@ async function handleBirdConfig(
         ibgpPeers: ibgpPeers.length,
     })).toString(16);
 
+    const regionLCs = getRegionLCs(regionCode);
+
     return success(c, {
         configHash,
         node: {
@@ -607,6 +690,10 @@ async function handleBirdConfig(
             regionCode,
             loopbackIpv4: loopback4,
             loopbackIpv6: loopback6,
+            continentLc: regionLCs.continentLc,
+            subregionLc: regionLCs.subregionLc,
+            regionCommunity: getRegionCommunity(regionCode),
+            bandwidthCommunity: getBandwidthCommunity(bandwidth),
         },
         policy: {
             dn42As: policyData.dn42As,
