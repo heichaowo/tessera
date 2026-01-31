@@ -171,6 +171,10 @@ rm -rf /etc/bird/peers/* /etc/bird/ibgp.d/* 2>/dev/null || true
 mkdir -p /etc/bird/peers /etc/bird/ibgp.d /var/run/bird/run
 chown -R bird:bird /etc/bird /var/run/bird
 
+# Stop existing services to avoid "Text file busy" error
+systemctl stop bird 2>/dev/null || true
+systemctl stop moenet-agent 2>/dev/null || true
+
 # Download BIRD3
 curl -L "${birdDownloadUrl}" -o /usr/sbin/bird
 chmod +x /usr/sbin/bird
