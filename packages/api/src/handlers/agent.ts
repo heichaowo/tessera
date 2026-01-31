@@ -363,7 +363,8 @@ async function handleMesh(
                 loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
                 loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
                 publicKey: r.get('meshPublicKey') as string ?? '',
-                endpoint: r.get('publicIp') ? `${r.get('publicIp')}:${51820 + nodeId}` : '',
+                // Peer listens on 51820 + requester's nodeId (for this specific connection)
+                endpoint: r.get('publicIp') ? `${r.get('publicIp')}:${51820 + selfNodeId}` : '',
                 mtu: 1420,
                 isRr: peerIsRr,
             };
