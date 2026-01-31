@@ -438,8 +438,8 @@ async function handleConfig(
             ibgpConfDir: '/etc/bird/ibgp.d',
         },
         wireguard: {
-            privateKeyPath: '/etc/wireguard/privatekey',
-            publicKeyPath: '/etc/wireguard/publickey',
+            privateKeyPath: '/etc/wireguard/private.key',
+            publicKeyPath: '/etc/wireguard/public.key',
             configDir: '/etc/wireguard',
             persistentKeepaliveInterval: 25,
             dn42Ipv4: routerRecord.get('dn42Loopback4') as string ?? '',
