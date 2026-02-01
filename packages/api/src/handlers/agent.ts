@@ -11,19 +11,38 @@ import { PeeringStatus, type BgpSessionAttributes } from '../db/models/bgpSessio
 
 /**
  * Derive link-local address from loopback IPv6
- * Loopback format: fd00:4242:7777:{region}:{local_index}::1
- * LLA format: fe80::998:{region}:{local_index}:1
+ * Loopback format: fd00:4242:7777:{region}:{node_id}::1
+ * LLA format: fe80::998:{region}:{node_id}:1
  */
 function deriveLLAFromLoopback(loopback: string): string {
     if (!loopback) return 'fe80::998:0:0:1';
-    // Parse loopback like "fd00:4242:7777:302:1::1"
+    // Parse loopback like "fd00:4242:7777:101:4::1"
     const parts = loopback.split(':');
     if (parts.length < 5) return 'fe80::998:0:0:1';
-    // parts[3] = region (e.g., "302")
-    // parts[4] = local_index (e.g., "1")
+    // parts[3] = region (e.g., "101")
+    // parts[4] = node_id (e.g., "4")
     const region = parts[3] || '0';
-    const localIndex = parts[4] || '0';
-    return `fe80::998:${region}:${localIndex}:1`;
+    const nodeId = parts[4] || '0';
+    return `fe80::998:${region}:${nodeId}:1`;
+}
+
+/**
+ * Compute loopback IPv6 address from regionCode and nodeId
+ * Format: fd00:4242:7777:{region}:{node_id}::1
+ * Example: regionCode=101, nodeId=4 -> fd00:4242:7777:101:4::1
+ */
+function computeLoopbackIPv6(regionCode: number, nodeId: number): string {
+    if (!regionCode || !nodeId) return '';
+    return `fd00:4242:7777:${regionCode}:${nodeId}::1`;
+}
+
+/**
+ * Compute loopback IPv4 address from nodeId
+ * Format: 172.22.188.{node_id}
+ */
+function computeLoopbackIPv4(nodeId: number): string {
+    if (!nodeId) return '';
+    return `172.22.188.${nodeId}`;
 }
 
 /**
@@ -430,8 +449,8 @@ async function handleMesh(
         nodeName: selfNodeName,
         nodeType: selfNodeType,
         regionCode: selfRegionCode,
-        loopbackIpv4: routerRecord.get('dn42Loopback4') as string ?? '',
-        loopbackIpv6: routerRecord.get('dn42Loopback6') as string ?? '',
+        loopbackIpv4: computeLoopbackIPv4(selfNodeId),
+        loopbackIpv6: computeLoopbackIPv6(selfRegionCode, selfNodeId),
         isRr: selfIsRr,
     };
 
@@ -458,8 +477,8 @@ async function handleMesh(
                 nodeName,
                 nodeType,
                 regionCode: peerRegionCode,
-                loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
-                loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
+                loopbackIpv4: computeLoopbackIPv4(nodeId),
+                loopbackIpv6: computeLoopbackIPv6(peerRegionCode, nodeId),
                 publicKey: r.get('meshPublicKey') as string ?? '',
                 // Peer listens on 51820 + requester's nodeId (for this specific connection)
                 endpoint: r.get('publicIp') ? `${r.get('publicIp')}:${51820 + selfNodeId}` : '',
@@ -541,10 +560,11 @@ async function handleConfig(
             publicKeyPath: '/etc/wireguard/public.key',
             configDir: '/etc/wireguard',
             persistentKeepaliveInterval: 25,
-            dn42Ipv4: routerRecord.get('dn42Loopback4') as string ?? '',
-            dn42Ipv6: routerRecord.get('dn42Loopback6') as string ?? '',
-            // Derive LLA from loopback: fd00:4242:7777:{region}:{local_index}::1 -> fe80::998:{region}:{local_index}:1
-            dn42Ipv6LinkLocal: deriveLLAFromLoopback(routerRecord.get('dn42Loopback6') as string ?? ''),
+            // Compute loopback addresses from nodeId and regionCode
+            dn42Ipv4: computeLoopbackIPv4(routerRecord.get('nodeId') as number ?? 0),
+            dn42Ipv6: computeLoopbackIPv6(routerRecord.get('regionCode') as number ?? 0, routerRecord.get('nodeId') as number ?? 0),
+            // Derive LLA from computed loopback
+            dn42Ipv6LinkLocal: deriveLLAFromLoopback(computeLoopbackIPv6(routerRecord.get('regionCode') as number ?? 0, routerRecord.get('nodeId') as number ?? 0)),
         },
         metric: {
             pingTimeout: 5,
@@ -635,8 +655,9 @@ async function handleBirdConfig(
     const nodeType = routerRecord.get('nodeType') as string ?? 'client';
     const regionCode = routerRecord.get('regionCode') as number ?? 0;
     const bandwidth = routerRecord.get('bandwidth') as string ?? '1G';
-    const loopback4 = routerRecord.get('dn42Loopback4') as string ?? '';
-    const loopback6 = routerRecord.get('dn42Loopback6') as string ?? '';
+    // Compute loopback addresses from regionCode and nodeId (authoritative source)
+    const loopback4 = computeLoopbackIPv4(nodeId);
+    const loopback6 = computeLoopbackIPv6(regionCode, nodeId);
     const selfIsRr = nodeType === 'rr' || nodeName.includes('-rr');
 
     // Get all other routers for iBGP peer filtering
@@ -656,14 +677,17 @@ async function handleBirdConfig(
             nodeName: r.get('name') as string,
             nodeType: r.get('nodeType') as string ?? 'client',
             regionCode: r.get('regionCode') as number ?? 0,
-            loopbackIpv4: r.get('dn42Loopback4') as string ?? '',
-            loopbackIpv6: r.get('dn42Loopback6') as string ?? '',
+            // Compute loopback addresses from regionCode and nodeId
+            loopbackIpv4: computeLoopbackIPv4(r.get('nodeId') as number ?? 0),
+            loopbackIpv6: computeLoopbackIPv6(r.get('regionCode') as number ?? 0, r.get('nodeId') as number ?? 0),
             isRr: (r.get('nodeType') as string ?? '') === 'rr' || (r.get('name') as string).includes('-rr'),
         }))
         .filter((peer) => {
             if (selfIsRr) {
-                // RR connects to all other RRs (regardless of region)
-                return peer.isRr;
+                // RR connects to:
+                // 1. All other RRs (regardless of region) - for RR full mesh
+                // 2. Clients in the same region - RR reflects routes to local clients
+                return peer.isRr || peer.regionCode === regionCode;
             }
             // Client connects only to RRs in same region
             return peer.isRr && peer.regionCode === regionCode;
