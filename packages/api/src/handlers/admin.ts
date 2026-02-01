@@ -109,9 +109,14 @@ async function enumRouters(c: Context): Promise<Response> {
             where: { router: r.uuid },
         });
 
+        // Compute isOpen: node accepts new peers if capacity allows
+        const maxPeers = r.maxPeers as number | null;
+        const isOpen = maxPeers === null || sessionCount < maxPeers;
+
         return {
             ...r,
             sessionCount,
+            isOpen,
         };
     }));
 

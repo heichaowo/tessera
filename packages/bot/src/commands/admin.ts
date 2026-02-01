@@ -144,10 +144,20 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            let message = '🌐 *MoeNet Nodes:*\n\n';
+            let message = '📡 *MoeNet Nodes 节点列表*\n\n';
             routers.forEach((r: RouterInfo) => {
                 const status = r.isOpen ? '🟢' : '🔴';
-                message += `${status} *${r.name}*\n   📍 ${r.location}\n   👥 ${r.sessionCount} peers\n\n`;
+                const capacity = r.maxPeers ? `${r.sessionCount || 0}/${r.maxPeers}` : `${r.sessionCount || 0}/∞`;
+                const ipv4 = r.supportsIpv4 ? '✓' : '✗';
+                const ipv6 = r.supportsIpv6 ? '✓' : '✗';
+
+                message += `${status} *${r.name}*\n`;
+                message += `   📍 ${r.location || 'Unknown'}`;
+                if (r.provider) message += ` | ${r.provider}`;
+                message += `\n`;
+                message += `   👥 ${capacity} peers | IPv4:${ipv4} IPv6:${ipv6}`;
+                if (!r.allowCnPeers) message += ` | 🚫CN`;
+                message += `\n\n`;
             });
 
             await ctx.reply(message, { parse_mode: 'Markdown' });
@@ -444,4 +454,9 @@ interface RouterInfo {
     endpoint?: string;
     wgPubkey?: string;
     nodeId?: number;
+    maxPeers?: number;
+    supportsIpv4?: boolean;
+    supportsIpv6?: boolean;
+    provider?: string;
+    allowCnPeers?: boolean;
 }
