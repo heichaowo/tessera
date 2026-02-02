@@ -481,8 +481,20 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
         return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
     }
 
-    // Update session
-    await models.bgpSessions.update(updateData, { where: { uuid } });
+    // Update session with error handling for PostgreSQL type errors
+    try {
+        await models.bgpSessions.update(updateData, { where: { uuid } });
+    } catch (error) {
+        console.error('[Admin] Error updating session:', error);
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+
+        // Handle PostgreSQL INET type errors (22P02)
+        if (errorMsg.includes('22P02') || errorMsg.includes('invalid input syntax')) {
+            return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid IP address format');
+        }
+
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, `Update failed: ${errorMsg}`);
+    }
 
     return success(c, { message: 'Session updated' });
 }
