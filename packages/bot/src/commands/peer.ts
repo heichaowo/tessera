@@ -843,18 +843,41 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 }
 
                 try {
-                    const requestBody = {
+                    const backup = flow.backup;
+
+                    // Only include fields that actually changed
+                    const requestBody: Record<string, unknown> = {
                         action: 'updateSession',
                         uuid,
-                        ipv6: current.ipv6 || null,
-                        ipv4: current.ipv4 || null,
-                        ipv6LinkLocal: current.localIpv6 || null,
-                        localIpv4: current.localIpv4 || null,
-                        endpoint: current.endpoint || null,
-                        mtu: current.mtu,
-                        contact: current.contact || null,
-                        extensions: (current.mpbgp ? 'mp_bgp' : '') + (current.extendedNexthop ? ',extended_nexthop' : ''),
                     };
+
+                    // Compare and add only changed fields
+                    if (current.ipv6 !== backup?.ipv6) {
+                        requestBody.ipv6 = current.ipv6 || null;
+                    }
+                    if (current.ipv4 !== backup?.ipv4) {
+                        requestBody.ipv4 = current.ipv4 || null;
+                    }
+                    if (current.localIpv6 !== backup?.localIpv6) {
+                        requestBody.ipv6LinkLocal = current.localIpv6 || null;
+                    }
+                    if (current.localIpv4 !== backup?.localIpv4) {
+                        requestBody.localIpv4 = current.localIpv4 || null;
+                    }
+                    if (current.endpoint !== backup?.endpoint) {
+                        requestBody.endpoint = current.endpoint || null;
+                    }
+                    if (current.mtu !== backup?.mtu) {
+                        requestBody.mtu = current.mtu;
+                    }
+                    if (current.contact !== backup?.contact) {
+                        requestBody.contact = current.contact || null;
+                    }
+
+                    // Build extensions string only if session type changed
+                    if (current.mpbgp !== backup?.mpbgp || current.extendedNexthop !== backup?.extendedNexthop) {
+                        requestBody.extensions = (current.mpbgp ? 'mp_bgp' : '') + (current.extendedNexthop ? ',extended_nexthop' : '');
+                    }
                     console.log('[modify_confirm] Request body:', JSON.stringify(requestBody));
                     const result = await apiRequest('/admin', 'POST', requestBody, config.apiToken);
                     console.log('[modify_confirm] Response:', JSON.stringify(result));
