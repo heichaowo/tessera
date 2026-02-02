@@ -109,7 +109,7 @@ describe('Agent Handler', () => {
         app.get('/agent/:router/:action', agentHandler);
 
         const res = await app.request('/agent/test-router/sessions', {
-            headers: { Authorization: 'Bearer valid-token' },
+            headers: { Authorization: 'Bearer test-key' },
         });
 
         expect(res.status).toBe(200);
@@ -126,7 +126,7 @@ describe('Agent Handler', () => {
         const res = await app.request('/agent/test-router/modify', {
             method: 'POST',
             headers: {
-                Authorization: 'Bearer valid-token',
+                Authorization: 'Bearer test-key',
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -146,7 +146,7 @@ describe('Agent Handler', () => {
         const res = await app.request('/agent/test-router/modify', {
             method: 'POST',
             headers: {
-                Authorization: 'Bearer valid-token',
+                Authorization: 'Bearer test-key',
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ status: 2 }),
@@ -161,7 +161,7 @@ describe('Agent Handler', () => {
         app.get('/agent/:router/:action', agentHandler);
 
         const res = await app.request('/agent/test-router/unknown-action', {
-            headers: { Authorization: 'Bearer valid-token' },
+            headers: { Authorization: 'Bearer test-key' },
         });
 
         expect(res.status).toBe(404);
@@ -171,7 +171,7 @@ describe('Agent Handler', () => {
 describe('Agent Heartbeat Handler', () => {
     test('should accept heartbeat with meshPublicKey', async () => {
         const mockRoutersUpdate = mock(() => Promise.resolve([1]));
-        mock.module('../db/dbContext', () => ({
+        mock.module('../../src/db/dbContext', () => ({
             getModels: () => ({
                 routers: {
                     findOne: mock(() => Promise.resolve({ get: () => 'test-router' })),
@@ -184,9 +184,9 @@ describe('Agent Heartbeat Handler', () => {
 
         const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
-        app.post('/agent/heartbeat', agentHandler);
+        app.post('/api/v1/agent/heartbeat', agentHandler);
 
-        const res = await app.request('/agent/heartbeat', {
+        const res = await app.request('/api/v1/agent/heartbeat', {
             method: 'POST',
             headers: {
                 Authorization: 'Bearer test-key',
@@ -210,9 +210,9 @@ describe('Agent Heartbeat Handler', () => {
     test('should reject heartbeat without node_id', async () => {
         const { default: agentHandler } = await import('../../src/handlers/agent');
         const app = new Hono();
-        app.post('/agent/heartbeat', agentHandler);
+        app.post('/api/v1/agent/heartbeat', agentHandler);
 
-        const res = await app.request('/agent/heartbeat', {
+        const res = await app.request('/api/v1/agent/heartbeat', {
             method: 'POST',
             headers: {
                 Authorization: 'Bearer test-key',
@@ -229,7 +229,7 @@ describe('Agent Heartbeat Handler', () => {
 
 describe('Agent Config Handler', () => {
     test('should return agent config for valid router', async () => {
-        mock.module('../db/dbContext', () => ({
+        mock.module('../../src/db/dbContext', () => ({
             getModels: () => ({
                 routers: {
                     findOne: mock(() => Promise.resolve({
@@ -257,7 +257,7 @@ describe('Agent Config Handler', () => {
         app.get('/agent/:router/:action', agentHandler);
 
         const res = await app.request('/agent/test-router/config', {
-            headers: { Authorization: 'Bearer valid-token' },
+            headers: { Authorization: 'Bearer test-key' },
         });
 
         expect(res.status).toBe(200);
@@ -271,7 +271,7 @@ describe('Agent Config Handler', () => {
 
 describe('Agent Mesh Handler', () => {
     test('should return mesh peers list', async () => {
-        mock.module('../db/dbContext', () => ({
+        mock.module('../../src/db/dbContext', () => ({
             getModels: () => ({
                 routers: {
                     findOne: mock(() => Promise.resolve({
@@ -318,7 +318,7 @@ describe('Agent Mesh Handler', () => {
         app.get('/agent/:router/:action', agentHandler);
 
         const res = await app.request('/agent/test-router/mesh', {
-            headers: { Authorization: 'Bearer valid-token' },
+            headers: { Authorization: 'Bearer test-key' },
         });
 
         expect(res.status).toBe(200);

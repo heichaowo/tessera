@@ -1,3 +1,8 @@
+---
+title: Bot Development Guide
+description: Guide for developing and extending the MoeNet Telegram Bot
+---
+
 # Bot Development Guide
 
 ## Overview
