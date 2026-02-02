@@ -66,19 +66,42 @@ async function runLocalCommand(command: string, target: string): Promise<string>
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
 
-    const cmdMap: Record<string, string> = {
-        ping: `ping -c 4 ${target}`,
-        trace: `traceroute -m 20 ${target}`,
-        tcping: `nc -zv ${target.split(':')[0]} ${target.split(':')[1] || 80} 2>&1`,
-        route: `birdc show route for ${target} all`,
-        path: `birdc show route for ${target} all | grep -E "BGP.as_path|via"`,
+    // Security: Validate target to prevent command injection
+    if (/[;&|`$(){}[\]<>\\"']/.test(target)) {
+        return 'Invalid target: contains forbidden characters';
+    }
+
+    // Additional validation: must look like a valid hostname/IP
+    const validTarget = /^[a-zA-Z0-9][a-zA-Z0-9.\-:]+$/.test(target);
+    if (!validTarget) {
+        return 'Invalid target format';
+    }
+
+    const cmdMap: Record<string, string[]> = {
+        ping: ['ping', '-c', '4', target],
+        trace: ['traceroute', '-m', '20', target],
+        tcping: ['nc', '-zv', target.split(':')[0] ?? target, target.split(':')[1] ?? '80'],
+        route: ['birdc', 'show', 'route', 'for', target, 'all'],
+        path: ['birdc', 'show', 'route', 'for', target, 'all'],
     };
 
-    const cmd = cmdMap[command];
-    if (!cmd) return 'Unknown command';
+    const args = cmdMap[command];
+    if (!args) return 'Unknown command';
 
     try {
-        const { stdout, stderr } = await execAsync(cmd, { timeout: 30000 });
+        // Use spawn-style exec with args array to avoid shell injection
+        const cmdStr = args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+        const { stdout, stderr } = await execAsync(cmdStr, { timeout: 30000, shell: '/bin/sh' });
+
+        // For path command, filter output
+        if (command === 'path') {
+            const lines = (stdout || stderr || '').split('\n');
+            const filtered = lines.filter(line =>
+                line.includes('BGP.as_path') || line.includes('via')
+            );
+            return filtered.join('\n') || 'No AS path found';
+        }
+
         return stdout || stderr || 'No output';
     } catch (error) {
         const execError = error as Error & { killed?: boolean };
@@ -260,7 +283,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
     });
 
     /**
-     * /whois <query> - WHOIS lookup
+     * /whois <query> - WHOIS lookup using Burble REST API
      */
     bot.command('whois', async (ctx) => {
         const query = ctx.match?.trim();
@@ -270,13 +293,24 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        await ctx.reply(`📋 Looking up ${query}...`);
-
-        // Use DN42 WHOIS for ASN queries
-        const server = query.toUpperCase().startsWith('AS') ? '-h whois.dn42' : '';
-        const result = await runLocalCommand('whois', `${server} ${query}`);
-
-        await ctx.reply(`\`\`\`\n${result.slice(0, 4000)}\n\`\`\``, { parse_mode: 'Markdown' });
+        try {
+            const result = await lookupWhois(query);
+            if (result) {
+                const formatted = formatWhoisResult(result);
+                if (formatted.length > 3900) {
+                    await ctx.reply(`📋 *WHOIS: ${query}*\n\n\`\`\`\n${formatted.slice(0, 3900)}\n... (truncated)\n\`\`\``, { parse_mode: 'Markdown' });
+                } else {
+                    await ctx.reply(`📋 *WHOIS: ${query}*\n\n\`\`\`\n${formatted}\n\`\`\``, { parse_mode: 'Markdown' });
+                }
+            } else {
+                await ctx.reply(`❌ 未找到: ${query}`);
+            }
+        } catch {
+            // Fallback to local whois
+            const server = query.toUpperCase().startsWith('AS') ? '-h whois.dn42' : '';
+            const result = await runLocalCommand('whois', `${server} ${query}`);
+            await ctx.reply(`\`\`\`\n${result.slice(0, 4000)}\n\`\`\``, { parse_mode: 'Markdown' });
+        }
     });
 
     /**
@@ -312,7 +346,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
     });
 
     /**
-     * /findnoc <ASN> - Find NOC contacts
+     * /findnoc <ASN> - Find NOC contacts using Burble REST API
      */
     bot.command('findnoc', async (ctx) => {
         const query = ctx.match?.trim().replace(/^AS/i, '');
@@ -322,28 +356,122 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        await ctx.reply(`📞 Looking up NOC for AS${query}...`);
+        try {
+            // Get ASN info from Burble API
+            const asnData = await lookupWhois(`AS${query}`);
+            if (!asnData) {
+                await ctx.reply(`❌ ASN not found 未找到: AS${query}`);
+                return;
+            }
 
-        // Get WHOIS info
-        const result = await runLocalCommand('whois', `-h whois.dn42 AS${query}`);
+            // Extract admin-c reference
+            const adminC = getWhoisAttr(asnData, 'admin-c');
+            if (!adminC) {
+                await ctx.reply(`ℹ️ No admin-c found for AS${query}\nTry /whois AS${query} for full record`);
+                return;
+            }
 
-        // Extract contact info
-        const lines = result.split('\n');
-        const contacts: string[] = [];
+            // Extract handle from markdown link "[NAME](person/NAME)"
+            let handle = adminC;
+            const match = adminC.match(/\[([^\]]+)\]/);
+            if (match && match[1]) handle = match[1];
 
-        for (const line of lines) {
-            if (line.match(/^(admin-c|tech-c|e-mail|contact|person):/i)) {
-                contacts.push(line.trim());
+            // Get person record
+            const personData = await lookupWhois(handle);
+            if (!personData) {
+                await ctx.reply(`ℹ️ Person record not found: ${handle}\nTry /whois AS${query} for full record`);
+                return;
+            }
+
+            // Collect contact fields
+            const contacts: string[] = [];
+            const contactFields = ['person', 'e-mail', 'contact', 'remarks'];
+            for (const field of contactFields) {
+                const value = getWhoisAttr(personData, field);
+                if (value) contacts.push(`${field}: ${value}`);
+            }
+
+            if (contacts.length > 0) {
+                await ctx.reply(
+                    `📞 *NOC Contacts for AS${query}*\n\n\`\`\`\n${contacts.join('\n')}\n\`\`\``,
+                    { parse_mode: 'Markdown' }
+                );
+            } else {
+                await ctx.reply(
+                    `ℹ️ No contact info found 未找到联系信息\n` +
+                    `Try /whois AS${query} for full record\n` +
+                    `尝试 /whois AS${query} 查看完整记录`
+                );
+            }
+        } catch {
+            // Fallback to local whois
+            const result = await runLocalCommand('whois', `-h whois.dn42 AS${query}`);
+            const lines = result.split('\n');
+            const contacts: string[] = [];
+            for (const line of lines) {
+                if (line.match(/^(admin-c|tech-c|e-mail|contact|person):/i)) {
+                    contacts.push(line.trim());
+                }
+            }
+            if (contacts.length > 0) {
+                await ctx.reply(
+                    `📞 *NOC Contacts for AS${query}*\n\n\`\`\`\n${contacts.join('\n')}\n\`\`\``,
+                    { parse_mode: 'Markdown' }
+                );
+            } else {
+                await ctx.reply(`ℹ️ No contact info found for AS${query}\nTry /whois AS${query}`);
             }
         }
-
-        if (contacts.length > 0) {
-            await ctx.reply(
-                `📞 *NOC Contacts for AS${query}*\n\n\`\`\`\n${contacts.join('\n')}\n\`\`\``,
-                { parse_mode: 'Markdown' }
-            );
-        } else {
-            await ctx.reply(`ℹ️ No contact info found for AS${query}\nTry /whois AS${query}`);
-        }
     });
+}
+
+/**
+ * Lookup WHOIS using Burble REST API
+ */
+async function lookupWhois(query: string): Promise<WhoisResult | null> {
+    const baseUrl = 'https://explorer.burble.com/api/registry';
+
+    // Detect object type
+    const q = query.toUpperCase();
+    let objectType = 'mntner';
+    if (q.startsWith('AS') && /^\d+$/.test(q.substring(2))) objectType = 'aut-num';
+    else if (q.endsWith('-MNT')) objectType = 'mntner';
+    else if (q.endsWith('-DN42')) objectType = 'person';
+    else if (q.includes('/')) objectType = q.includes(':') ? 'route6' : 'route';
+    else if (q.includes(':')) objectType = 'inet6num';
+    else if (/^\d+\.\d+\.\d+\.\d+/.test(q)) objectType = 'inetnum';
+
+    const objectKey = objectType === 'aut-num' ? query.toUpperCase() : query;
+
+    try {
+        const response = await fetch(`${baseUrl}/${objectType}/${objectKey}`);
+        if (!response.ok) return null;
+
+        const data = await response.json() as Record<string, WhoisResult>;
+        const key = `${objectType}/${objectKey}`;
+        return data[key] || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Format WHOIS result as text
+ */
+function formatWhoisResult(data: WhoisResult): string {
+    if (!data.Attributes) return 'No data';
+    return data.Attributes.map(([key, value]) => `${key}: ${value}`).join('\n');
+}
+
+/**
+ * Get single attribute from WHOIS result
+ */
+function getWhoisAttr(data: WhoisResult, key: string): string | undefined {
+    const attr = data.Attributes?.find(a => a[0] === key);
+    return attr ? attr[1] : undefined;
+}
+
+interface WhoisResult {
+    Attributes: [string, string][];
+    Backlinks?: string[];
 }

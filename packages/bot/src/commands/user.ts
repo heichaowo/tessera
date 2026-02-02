@@ -8,33 +8,58 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-
-// Inline messages (previously from i18n)
-const MSG = {
-    LOGIN_ALREADY: (asn: number) => `✅ Already logged in as AS${asn}\n已登录 AS${asn}`,
-    LOGIN_ASK_ASN: '🔐 Please enter your ASN:\n请输入你的 ASN:\n\nExample: `4242420998`',
-    LOGIN_CHOOSE_METHOD: 'Choose authentication method:\n选择认证方式:',
-    LOGIN_SUCCESS: (asn: number) => `✅ Login successful! Welcome AS${asn}\n登录成功! 欢迎 AS${asn}`,
-    ERROR_INVALID_ASN: '❌ Invalid ASN. DN42 range: 4242420000-4242429999',
-    ERROR_NOT_LOGGED_IN: '❌ Please /login first\n请先登录',
-    CANCELLED: '🚫 Cancelled\n已取消',
-};
+import {
+    ICONS,
+    DIVIDER,
+    formatTemplate,
+    LOGIN_SUCCESS,
+    LOGIN_SIGNATURE_CHALLENGE,
+    CANCELLED,
+} from '../templates';
+import {
+    START_WELCOME,
+    START_COMMANDS,
+    LOGIN_EMAIL_SENT,
+    ERROR_NOT_LOGGED_IN,
+} from '../i18n';
 
 const execAsync = promisify(exec);
+
+// =============================================================================
+// Types
+// =============================================================================
 
 interface APIResponse {
     code: number;
     message?: string;
     data?: {
         person?: string;
-        availableAuthMethods?: Array<{ type: number }>;
+        mntBy?: string;
+        availableAuthMethods?: Array<{
+            type: number;
+            value?: string;
+            fingerprint?: string;
+        }>;
         [key: string]: unknown;
     };
 }
 
-/**
- * API client for moenet-core
- */
+interface ChallengeData {
+    asn: number;
+    mntBy: string;
+    challenge: string;
+    method: 'gpg' | 'ssh' | 'email';
+    gpgFp?: string;
+    sshKey?: string;
+}
+
+// Store for verification challenges
+const challengeStore = new Map<number, ChallengeData>();
+
+// =============================================================================
+// API Client
+// =============================================================================
+
 async function apiRequest(endpoint: string, method = 'POST', body?: unknown): Promise<APIResponse> {
     const response = await fetch(`${config.apiUrl}${endpoint}`, {
         method,
@@ -46,10 +71,253 @@ async function apiRequest(endpoint: string, method = 'POST', body?: unknown): Pr
     return response.json() as Promise<APIResponse>;
 }
 
-// Store for verification challenges
-const challengeStore = new Map<number, { asn: number; challenge: string; method: string; gpgFp?: string; sshKey?: string }>();
+// =============================================================================
+// GPG Verification (Full Implementation)
+// =============================================================================
+
+/**
+ * Extract primary key fingerprint from GPG output.
+ * GPG signatures may use subkeys, but DN42 registry stores primary key fingerprints.
+ */
+function extractFingerprintFromGpgOutput(stderr: string): string {
+    let primaryFingerprint = '';
+    let subkeyFingerprint = '';
+
+    for (const line of stderr.split('\n')) {
+        if (line.includes('Primary key fingerprint:')) {
+            const parts = line.split(':');
+            const lastPart = parts[parts.length - 1];
+            if (parts.length > 1 && lastPart) {
+                primaryFingerprint = lastPart.trim().replace(/ /g, '').toUpperCase();
+            }
+        } else if (line.includes('Subkey fingerprint:')) {
+            const parts = line.split(':');
+            const lastPart = parts[parts.length - 1];
+            if (parts.length > 1 && lastPart) {
+                subkeyFingerprint = lastPart.trim().replace(/ /g, '').toUpperCase();
+            }
+        } else if (line.toLowerCase().includes('fingerprint:') && !primaryFingerprint) {
+            const parts = line.split(':');
+            const lastPart = parts[parts.length - 1];
+            if (parts.length > 1 && lastPart) {
+                primaryFingerprint = lastPart.trim().replace(/ /g, '').toUpperCase();
+            }
+        } else if (line.toLowerCase().includes('using') && line.toLowerCase().includes('key') && !subkeyFingerprint) {
+            const words = line.split(/\s+/);
+            for (const word of words) {
+                if (word.length >= 16 && /^[0-9A-Fa-f]+$/.test(word)) {
+                    subkeyFingerprint = word.toUpperCase();
+                }
+            }
+        }
+    }
+
+    return primaryFingerprint || subkeyFingerprint;
+}
+
+/**
+ * Decrypt GPG signed message to get original content
+ */
+async function gpgDecryptChallenge(sigPath: string): Promise<{ content: string | null; stderr: string }> {
+    try {
+        const { stdout, stderr } = await execAsync(`gpg --decrypt "${sigPath}" 2>&1`);
+        return { content: stdout.trim(), stderr };
+    } catch (error) {
+        const e = error as Error & { stderr?: string };
+        return { content: null, stderr: e.stderr || String(e) };
+    }
+}
+
+/**
+ * Import GPG key from keyserver
+ */
+async function recvGpgKeyFromKeyserver(fingerprint: string, keyserver: string): Promise<boolean> {
+    try {
+        await execAsync(`gpg --keyserver "${keyserver}" --recv-keys "${fingerprint}"`, { timeout: 30000 });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Verify GPG signature and check if fingerprint matches
+ */
+async function tryGpgVerifyFingerprint(
+    sigPath: string,
+    gpgFingerprints: string[]
+): Promise<{ success: boolean; fingerprint?: string; error?: string }> {
+    try {
+        const { stderr } = await execAsync(`gpg --verify "${sigPath}" 2>&1`);
+        const signatureFingerprint = extractFingerprintFromGpgOutput(stderr);
+
+        if (!signatureFingerprint) {
+            return { success: false, error: 'Could not extract fingerprint from signature' };
+        }
+
+        const fingerprintsUpper = gpgFingerprints.map(fp => fp.replace(/ /g, '').toUpperCase());
+
+        const fingerprintMatched = fingerprintsUpper.some(fp =>
+            signatureFingerprint.includes(fp) || fp.includes(signatureFingerprint)
+        );
+
+        if (!fingerprintMatched) {
+            return { success: false, fingerprint: signatureFingerprint, error: 'Fingerprint not matched' };
+        }
+
+        return { success: true, fingerprint: signatureFingerprint };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+}
+
+/**
+ * Full GPG signature verification (dn42-bot style)
+ */
+async function verifyGpgSignatureFull(
+    signature: string,
+    expectedContent: string,
+    gpgFingerprints: string[]
+): Promise<{ verified: boolean; fingerprint?: string; needsManualKey?: boolean; error?: string }> {
+    const tmpDir = os.tmpdir();
+    const uniqueId = crypto.randomBytes(16).toString('hex');
+    const sigFile = path.join(tmpDir, `sig_${uniqueId}.asc`);
+
+    try {
+        await fs.writeFile(sigFile, signature);
+
+        // Step 1: Verify challenge string matches
+        const { content } = await gpgDecryptChallenge(sigFile);
+
+        if (!content || !content.includes(expectedContent)) {
+            return {
+                verified: false,
+                error: `Challenge mismatch. Expected: ${expectedContent}, Got: ${content || '(unable to decrypt)'}`,
+            };
+        }
+
+        // Step 2: Try to verify fingerprint directly
+        let result = await tryGpgVerifyFingerprint(sigFile, gpgFingerprints);
+
+        if (result.success) {
+            return { verified: true, fingerprint: result.fingerprint };
+        }
+
+        // Step 3: Try to fetch key from keyservers
+        const keyservers = [
+            'hkps://keys.openpgp.org',
+            'hkps://keyserver.ubuntu.com',
+        ];
+
+        for (const fp of gpgFingerprints) {
+            for (const keyserver of keyservers) {
+                await recvGpgKeyFromKeyserver(fp.replace(/ /g, ''), keyserver);
+            }
+        }
+
+        // Retry verification
+        result = await tryGpgVerifyFingerprint(sigFile, gpgFingerprints);
+
+        if (result.success) {
+            return { verified: true, fingerprint: result.fingerprint };
+        }
+
+        // Step 4: Need manual key upload
+        return { verified: false, needsManualKey: true, error: result.error };
+
+    } finally {
+        try {
+            await fs.unlink(sigFile);
+        } catch { }
+    }
+}
+
+// =============================================================================
+// SSH Verification (Full Implementation)
+// =============================================================================
+
+/**
+ * Full SSH signature verification
+ */
+async function verifySshSignatureFull(
+    signature: string,
+    challenge: string,
+    sshKey: string
+): Promise<{ verified: boolean; error?: string }> {
+    const tmpDir = os.tmpdir();
+    const uniqueId = crypto.randomBytes(16).toString('hex');
+    const sigFile = path.join(tmpDir, `ssh_sig_${uniqueId}.sig`);
+    const pubFile = path.join(tmpDir, `ssh_pub_${uniqueId}.pub`);
+    const allowFile = path.join(tmpDir, `ssh_allow_${uniqueId}.txt`);
+
+    try {
+        await fs.writeFile(sigFile, signature);
+        await fs.writeFile(pubFile, sshKey);
+        await fs.writeFile(allowFile, `user ${sshKey}\n`);
+
+        // Escape challenge to prevent shell injection
+        const safeChallenge = challenge.replace(/'/g, "'\\''");
+        const result = await execAsync(
+            `echo -n '${safeChallenge}' | ssh-keygen -Y verify -f "${allowFile}" -I user -n file -s "${sigFile}"`,
+            { timeout: 10000 }
+        );
+
+        return { verified: result.stdout.includes('Good signature') || result.stderr.includes('Good signature') };
+
+    } catch (error) {
+        const e = error as Error & { stdout?: string; stderr?: string };
+        // ssh-keygen outputs "Good signature" even with non-zero exit in some cases
+        if (e.stdout?.includes('Good signature') || e.stderr?.includes('Good signature')) {
+            return { verified: true };
+        }
+        return { verified: false, error: String(error) };
+    } finally {
+        for (const f of [sigFile, pubFile, allowFile]) {
+            try { await fs.unlink(f); } catch { }
+        }
+    }
+}
+
+// =============================================================================
+// Command Registration
+// =============================================================================
 
 export function registerUserCommands(bot: Bot<BotContext>) {
+    /**
+     * /start - Welcome message
+     */
+    bot.command(['start', 'help'], async (ctx) => {
+        // Auto-login admin user
+        const username = ctx.from?.username?.toLowerCase();
+        const adminUsername = config.adminUsername.toLowerCase().replace('@', '');
+
+        if (username === adminUsername && !ctx.session.asn) {
+            ctx.session.asn = config.localAsn || 4242420998;
+            ctx.session.person = 'MOENET-MNT';
+            ctx.session.isAdmin = true;
+        }
+
+        // Send welcome message (plain text with link preview)
+        await ctx.reply(START_WELCOME, { link_preview_options: { is_disabled: false } });
+
+        // Send command list as second message (with code block)
+        await ctx.reply(START_COMMANDS, { parse_mode: 'Markdown' });
+    });
+
+    /**
+     * /cancel - Global cancel handler
+     */
+    bot.command('cancel', async (ctx) => {
+        const userId = ctx.from?.id;
+        if (userId) {
+            challengeStore.delete(userId);
+            ctx.session.awaitingAsn = false;
+        }
+        await ctx.reply(
+            `${ICONS.cancel} Operation cancelled. No ongoing operations.\n操作已取消。没有正在进行的操作。`
+        );
+    });
+
     /**
      * /login - Start authentication flow
      */
@@ -57,7 +325,9 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         // Check if already logged in
         if (ctx.session.asn) {
             await ctx.reply(
-                MSG.LOGIN_ALREADY(ctx.session.asn),
+                `${ICONS.info} *Already logged in 已登录*\n${DIVIDER}\n` +
+                `Current identity 当前身份: \`${ctx.session.person || `AS${ctx.session.asn}`}\`\n\n` +
+                `Use /logout to sign out.\n使用 /logout 退出。`,
                 { parse_mode: 'Markdown' }
             );
             return;
@@ -65,10 +335,16 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
         // Mark that we're awaiting ASN input
         ctx.session.awaitingAsn = true;
-        await ctx.reply(MSG.LOGIN_ASK_ASN, { parse_mode: 'Markdown' });
+        await ctx.reply(
+            `${ICONS.login} *DN42 Login 登录*\n${DIVIDER}\n` +
+            `Enter your ASN\n请输入你的 ASN\n\n` +
+            `Example: \`AS4242420998\` or \`4242420998\`\n\n` +
+            `/cancel to abort 取消`,
+            { parse_mode: 'Markdown' }
+        );
     });
 
-    // Handle ASN input for login - ONLY when awaiting ASN
+    // Handle ASN input for login
     bot.on('message:text', async (ctx, next) => {
         // Only process if explicitly awaiting ASN input
         if (!ctx.session.awaitingAsn) {
@@ -80,21 +356,21 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         // Cancel
         if (text === '/cancel') {
             ctx.session.awaitingAsn = false;
-            await ctx.reply(MSG.CANCELLED);
+            await ctx.reply(`${ICONS.cancel} ${CANCELLED}`);
             return;
         }
 
         // Check if it looks like an ASN
         const asnMatch = text.match(/^(?:AS)?(\d+)$/i);
         if (!asnMatch?.[1]) {
-            await ctx.reply(MSG.ERROR_INVALID_ASN);
+            await ctx.reply(`${ICONS.error} Invalid ASN format. Example: 4242420998\n无效的 ASN 格式。`);
             return;
         }
 
         const asn = parseInt(asnMatch[1]);
 
         if (asn < 4242420000 || asn > 4242429999) {
-            await ctx.reply(MSG.ERROR_INVALID_ASN);
+            await ctx.reply(`${ICONS.error} Invalid ASN. DN42 range: 4242420000-4242429999`);
             return;
         }
 
@@ -109,43 +385,67 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             });
 
             if (result.code !== 0) {
-                await ctx.reply(`❌ Error: ${result.message ?? 'Unknown error'}`);
+                await ctx.reply(`${ICONS.error} Error: ${result.message ?? 'Unknown error'}`);
                 return;
             }
 
             const person = result.data?.person;
-            const availableAuthMethods = result.data?.availableAuthMethods;
+            const mntBy = result.data?.mntBy || `AS${asn}-MNT`;
+            const availableAuthMethods = result.data?.availableAuthMethods || [];
 
-            if (!availableAuthMethods || availableAuthMethods.length === 0) {
+            if (availableAuthMethods.length === 0) {
                 await ctx.reply(
-                    `❌ No authentication methods found for AS${asn}\n` +
+                    `${ICONS.error} *No authentication methods found*\n` +
                     `在 Registry 中未找到认证方式\n\n` +
-                    'Please make sure your WHOIS object has pgp-fingerprint or contact email.'
+                    `ASN: \`AS${asn}\`\n\n` +
+                    `Please make sure your WHOIS object has pgp-fingerprint or contact email.`,
+                    { parse_mode: 'Markdown' }
                 );
                 return;
+            }
+
+            // Parse auth methods
+            const gpgFingerprints: string[] = [];
+            const sshKeys: string[] = [];
+            const emails: string[] = [];
+
+            for (const method of availableAuthMethods) {
+                if (method.type === 1 && method.fingerprint) {
+                    gpgFingerprints.push(method.fingerprint);
+                } else if (method.type === 2 && method.value) {
+                    sshKeys.push(method.value);
+                } else if (method.type === 3 && method.value) {
+                    emails.push(method.value);
+                }
             }
 
             // Build auth method keyboard
             const keyboard = new InlineKeyboard();
 
-            // Group by type
-            const hasGPG = availableAuthMethods.some((m: { type: number }) => m.type === 1);
-            const hasEmail = availableAuthMethods.some((m: { type: number }) => m.type === 3);
-            const hasSSH = availableAuthMethods.some((m: { type: number }) => m.type === 2);
-
-            if (hasGPG) {
-                keyboard.text('🔐 GPG Signature 签名', `login:gpg:${asn}`);
+            if (gpgFingerprints.length > 0) {
+                keyboard.text('🔐 GPG Signature GPG 签名', `login:gpg:${asn}`);
             }
-            if (hasEmail) {
+            if (sshKeys.length > 0) {
+                keyboard.text('🔑 SSH Signature SSH 签名', `login:ssh:${asn}`);
+            }
+            if (emails.length > 0) {
                 keyboard.text('📧 Email 邮箱', `login:email:${asn}`);
             }
-            if (hasSSH) {
-                keyboard.text('🔑 SSH Signature', `login:ssh:${asn}`);
-            }
+
+            // Store available auth data
+            challengeStore.set(ctx.from.id, {
+                asn,
+                mntBy,
+                challenge: '',
+                method: 'email', // default
+                gpgFp: gpgFingerprints[0],
+                sshKey: sshKeys[0],
+            });
 
             await ctx.reply(
                 `👤 *${person}* (AS${asn})\n\n` +
-                MSG.LOGIN_CHOOSE_METHOD,
+                `Choose authentication method. Use /cancel to interrupt.\n` +
+                `选择验证方式。使用 /cancel 终止操作。`,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: keyboard,
@@ -153,7 +453,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             );
         } catch (error) {
             console.error('[Login] Error:', error);
-            await ctx.reply('❌ Failed to query authentication methods');
+            await ctx.reply(`${ICONS.error} Failed to query authentication methods`);
         }
     });
 
@@ -164,49 +464,39 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         const asn = parseInt(asnStr);
         const userId = ctx.from.id;
 
+        // Get stored data
+        const stored = challengeStore.get(userId);
+        const gpgFp = stored?.gpgFp || '';
+
         // Generate challenge
         const challenge = crypto.randomBytes(16).toString('hex');
 
         // Store challenge
-        challengeStore.set(userId, { asn, challenge, method: 'gpg' });
+        challengeStore.set(userId, {
+            asn,
+            mntBy: stored?.mntBy || `AS${asn}-MNT`,
+            challenge,
+            method: 'gpg',
+            gpgFp,
+        });
+
+        const fpDisplay = gpgFp.length > 16 ? `${gpgFp.slice(0, 8)}...${gpgFp.slice(-8)}` : gpgFp;
 
         await ctx.answerCallbackQuery();
         await ctx.editMessageText(
             `🔐 *GPG Signature Challenge*\n` +
-            `🔐 *GPG 签名挑战*\n\n` +
-            `Challenge String / 挑战字符串:\n` +
+            `🔐 *GPG 签名挑战*\n` +
+            `${DIVIDER}\n` +
+            `Selected GPG Fingerprint 选择的 GPG 指纹:\n` +
+            `- \`${fpDisplay}\`\n\n` +
+            `Challenge String 挑战字符串:\n` +
             `\`${challenge}\`\n\n` +
-            `Please sign with your GPG key:\n` +
-            `请使用你的 GPG 私钥签名:\n\n` +
+            `Please sign the challenge string with your GPG private key and send the signature.\n` +
+            `请使用你的 GPG 私钥对挑战字符串进行签名，并发送签名结果。\n\n` +
+            `Command 命令:\n` +
             `\`echo -n '${challenge}' | gpg --clearsign\`\n\n` +
-            `Send the complete signed message.\n` +
-            `发送完整的签名消息。`,
-            { parse_mode: 'Markdown' }
-        );
-    });
-
-    // Handle Email login
-    bot.callbackQuery(/^login:email:(\d+)$/, async (ctx) => {
-        const asnStr = ctx.match?.[1];
-        if (!asnStr) return;
-        const asn = parseInt(asnStr);
-        const userId = ctx.from.id;
-
-        // Generate 6-digit code
-        const code = String(Math.floor(100000 + Math.random() * 900000));
-
-        // Store challenge
-        challengeStore.set(userId, { asn, challenge: code, method: 'email' });
-
-        // TODO: Send email via API
-        await ctx.answerCallbackQuery();
-        await ctx.editMessageText(
-            `📧 *Email Verification*\n` +
-            `📧 *邮箱验证*\n\n` +
-            `Verification code has been sent to your email.\n` +
-            `验证码已发送至您的邮箱。\n\n` +
-            `Please enter the 6-digit code:\n` +
-            `请输入6位验证码:`,
+            `Send the complete signed message (including headers). Use /cancel to interrupt.\n` +
+            `发送完整的签名消息（包括头部）。使用 /cancel 终止操作。`,
             { parse_mode: 'Markdown' }
         );
     });
@@ -218,25 +508,81 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         const asn = parseInt(asnStr);
         const userId = ctx.from.id;
 
+        const stored = challengeStore.get(userId);
+        const sshKey = stored?.sshKey || '';
+
         // Generate challenge
         const challenge = crypto.randomBytes(16).toString('hex');
 
         // Store challenge
-        challengeStore.set(userId, { asn, challenge, method: 'ssh' });
+        challengeStore.set(userId, {
+            asn,
+            mntBy: stored?.mntBy || `AS${asn}-MNT`,
+            challenge,
+            method: 'ssh',
+            sshKey,
+        });
+
+        const sshKeyDisplay = sshKey.length > 60 ? `\`${sshKey.slice(0, 60)}...\`` : `\`${sshKey}\``;
 
         await ctx.answerCallbackQuery();
         await ctx.editMessageText(
             `🔑 *SSH Signature Challenge*\n` +
-            `🔑 *SSH 签名挑战*\n\n` +
-            `Challenge String / 挑战字符串:\n` +
+            `🔑 *SSH 签名挑战*\n` +
+            `${DIVIDER}\n` +
+            `Selected SSH Public Key 选择的 SSH 公钥:\n` +
+            `- ${sshKeyDisplay}\n\n` +
+            `Challenge String 挑战字符串:\n` +
             `\`${challenge}\`\n\n` +
-            `Please sign with your SSH key:\n` +
-            `请使用你的 SSH 私钥签名:\n\n` +
+            `Please sign the challenge string with your SSH private key and send the signature.\n` +
+            `请使用你的 SSH 私钥对挑战字符串进行签名，并发送签名结果。\n\n` +
+            `Command 命令:\n` +
             `\`echo -n '${challenge}' | ssh-keygen -Y sign -f ~/.ssh/id_ed25519 -n file\`\n\n` +
-            `Send the complete signature.\n` +
-            `发送完整的签名结果。`,
+            `Send the output signature. Use /cancel to interrupt.\n` +
+            `发送输出的签名内容。使用 /cancel 终止操作。`,
             { parse_mode: 'Markdown' }
         );
+    });
+
+    // Handle Email login
+    bot.callbackQuery(/^login:email:(\d+)$/, async (ctx) => {
+        const asnStr = ctx.match?.[1];
+        if (!asnStr) return;
+        const asn = parseInt(asnStr);
+        const userId = ctx.from.id;
+
+        const stored = challengeStore.get(userId);
+
+        // Generate 6-digit code
+        const code = String(Math.floor(100000 + Math.random() * 900000));
+
+        // Store code
+        challengeStore.set(userId, {
+            asn,
+            mntBy: stored?.mntBy || `AS${asn}-MNT`,
+            challenge: code,
+            method: 'email',
+        });
+
+        // Send email via API
+        try {
+            const result = await apiRequest('/auth', 'POST', {
+                action: 'sendEmail',
+                asn: String(asn),
+                code,
+            });
+
+            if (result.code !== 0) {
+                await ctx.answerCallbackQuery(`${ICONS.error} ${result.message}`);
+                return;
+            }
+
+            await ctx.answerCallbackQuery();
+            await ctx.editMessageText(LOGIN_EMAIL_SENT, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('[Email] Error:', error);
+            await ctx.answerCallbackQuery(`${ICONS.error} Failed to send email`);
+        }
     });
 
     // Handle signature/code verification
@@ -244,7 +590,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         const userId = ctx.from.id;
         const stored = challengeStore.get(userId);
 
-        if (!stored) {
+        if (!stored || !stored.challenge) {
             return next();
         }
 
@@ -253,11 +599,11 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         // Cancel
         if (text === '/cancel') {
             challengeStore.delete(userId);
-            await ctx.reply(MSG.CANCELLED);
+            await ctx.reply(`${ICONS.cancel} ${CANCELLED}`);
             return;
         }
 
-        const { asn, challenge, method } = stored;
+        const { asn, mntBy, challenge, method } = stored;
 
         try {
             if (method === 'email') {
@@ -265,48 +611,80 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                 if (text === challenge) {
                     challengeStore.delete(userId);
                     ctx.session.asn = asn;
-                    ctx.session.person = `AS${asn}`;
+                    ctx.session.person = mntBy;
                     await ctx.reply(
-                        MSG.LOGIN_SUCCESS(asn),
+                        `${ICONS.success} *Signature verified successfully!*\n` +
+                        `${ICONS.success} *签名验证成功！*\n\n` +
+                        `Welcome! \`${mntBy}  AS${asn}\`\n` +
+                        `欢迎你！\`${mntBy}  AS${asn}\``,
                         { parse_mode: 'Markdown' }
                     );
                 } else {
-                    await ctx.reply('❌ Invalid code. Try again.\n验证码错误，请重试。');
+                    await ctx.reply(`${ICONS.error} Invalid code. Try again.\n验证码错误，请重试。`);
                 }
             } else if (method === 'gpg') {
-                // Verify GPG signature
-                const verified = await verifyGpgSignature(text, challenge);
+                // Verify GPG signature (full implementation)
+                const gpgFps = stored.gpgFp ? [stored.gpgFp] : [];
+                const result = await verifyGpgSignatureFull(text, challenge, gpgFps);
 
-                if (verified) {
+                if (result.verified) {
                     challengeStore.delete(userId);
                     ctx.session.asn = asn;
-                    ctx.session.person = `AS${asn}`;
+                    ctx.session.person = mntBy;
                     await ctx.reply(
-                        MSG.LOGIN_SUCCESS(asn),
+                        `${ICONS.success} *Signature verified successfully!*\n` +
+                        `${ICONS.success} *签名验证成功！*\n\n` +
+                        `Welcome! \`${mntBy}  AS${asn}\`\n` +
+                        `欢迎你！\`${mntBy}  AS${asn}\``,
                         { parse_mode: 'Markdown' }
                     );
+                } else if (result.needsManualKey) {
+                    await ctx.reply(
+                        `${ICONS.warning} Could not verify the signature with available keys.\n` +
+                        `无法使用可用的密钥验证签名。\n\n` +
+                        `Error: ${result.error}\n\n` +
+                        `Please try /login again or contact @HeiCha for help.\n` +
+                        `请重试 /login 或联系 @HeiCha 寻求帮助。`
+                    );
+                    challengeStore.delete(userId);
                 } else {
-                    await ctx.reply('❌ Signature verification failed.\n签名验证失败。');
+                    await ctx.reply(
+                        `${ICONS.error} *Signature verification failed*\n签名验证失败\n\n` +
+                        `${result.error || 'Unknown error'}\n\n` +
+                        `Use /login to try again.\n使用 /login 重试。`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    challengeStore.delete(userId);
                 }
             } else if (method === 'ssh') {
-                // Verify SSH signature
-                const verified = await verifySshSignature(text, challenge);
+                // Verify SSH signature (full implementation)
+                const sshKey = stored.sshKey || '';
+                const result = await verifySshSignatureFull(text, challenge, sshKey);
 
-                if (verified) {
+                if (result.verified) {
                     challengeStore.delete(userId);
                     ctx.session.asn = asn;
-                    ctx.session.person = `AS${asn}`;
+                    ctx.session.person = mntBy;
                     await ctx.reply(
-                        MSG.LOGIN_SUCCESS(asn),
+                        `${ICONS.success} *Signature verified successfully!*\n` +
+                        `${ICONS.success} *签名验证成功！*\n\n` +
+                        `Welcome! \`${mntBy}  AS${asn}\`\n` +
+                        `欢迎你！\`${mntBy}  AS${asn}\``,
                         { parse_mode: 'Markdown' }
                     );
                 } else {
-                    await ctx.reply('❌ Signature verification failed.\n签名验证失败。');
+                    await ctx.reply(
+                        `${ICONS.error} *Signature verification failed*\n签名验证失败\n\n` +
+                        `${result.error || 'Unknown error'}\n\n` +
+                        `Use /login to try again.\n使用 /login 重试。`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    challengeStore.delete(userId);
                 }
             }
         } catch (error) {
             console.error('[Login] Verification error:', error);
-            await ctx.reply(`❌ Verification error: ${(error as Error).message}`);
+            await ctx.reply(`${ICONS.error} Verification error: ${(error as Error).message}`);
         }
     });
 
@@ -315,7 +693,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
      */
     bot.command('logout', async (ctx) => {
         if (!ctx.session.asn) {
-            await ctx.reply('❌ You are not logged in.\n你尚未登录。');
+            await ctx.reply(`${ICONS.error} You are not logged in.\n你尚未登录。`);
             return;
         }
 
@@ -324,7 +702,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         ctx.session.person = undefined;
         ctx.session.isAdmin = undefined;
 
-        await ctx.reply(`👋 Logged out from AS${asn}\n已退出 AS${asn}`);
+        await ctx.reply(`${ICONS.logout} Logged out from AS${asn}\n已退出 AS${asn}`);
     });
 
     /**
@@ -332,7 +710,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
      */
     bot.command('whoami', async (ctx) => {
         if (!ctx.session.asn) {
-            await ctx.reply(MSG.ERROR_NOT_LOGGED_IN);
+            await ctx.reply(ERROR_NOT_LOGGED_IN);
             return;
         }
 
@@ -340,59 +718,10 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         const adminBadge = isAdmin ? ' 👑 Admin' : '';
 
         await ctx.reply(
-            `👤 *Current User 当前用户*\n\n` +
-            `ASN: AS${asn}\n` +
+            `👤 *Current User 当前用户*\n${DIVIDER}\n\n` +
+            `ASN: \`AS${asn}\`\n` +
             `Name: ${person}${adminBadge}`,
             { parse_mode: 'Markdown' }
         );
     });
-}
-
-/**
- * Verify GPG clearsign signature
- */
-async function verifyGpgSignature(signature: string, expectedContent: string): Promise<boolean> {
-    const tmpDir = os.tmpdir();
-    const sigFile = path.join(tmpDir, `sig_${Date.now()}.asc`);
-
-    try {
-        await fs.writeFile(sigFile, signature);
-
-        // Verify and decrypt
-        const { stdout, stderr } = await execAsync(`gpg --decrypt "${sigFile}" 2>&1`);
-        const content = stdout.trim();
-
-        // Check if content matches challenge
-        if (content === expectedContent) {
-            return true;
-        }
-
-        // Also check in stderr (gpg sometimes outputs there)
-        if (stderr.includes('Good signature')) {
-            return true;
-        }
-
-        return false;
-    } catch (error) {
-        console.error('[GPG] Verification error:', error);
-        return false;
-    } finally {
-        try {
-            await fs.unlink(sigFile);
-        } catch { }
-    }
-}
-
-/**
- * Verify SSH signature
- */
-async function verifySshSignature(signature: string, _expectedContent: string): Promise<boolean> {
-    // SSH signature verification requires the public key
-    // For now, just check if the signature format is valid
-    if (signature.includes('-----BEGIN SSH SIGNATURE-----')) {
-        // TODO: Proper SSH signature verification with known public keys
-        console.log('[SSH] Signature format valid, TODO: implement full verification');
-        return true; // Placeholder - need to implement properly
-    }
-    return false;
 }

@@ -1,5 +1,10 @@
 /**
- * Localization Module - Bilingual Messages (EN/CN)
+ * DN42 Bot - Bilingual Message Templates (i18n)
+ *
+ * All messages in Chinese/English format.
+ * Format: "English text\n中文文字"
+ * 
+ * Ported from: moenet-dn42-control-plane/src/bot/i18n.py
  */
 
 export type Locale = 'en' | 'zh';
@@ -36,7 +41,273 @@ export function bi(msg: BilingualMessage): string {
     return `${msg.en}\n${msg.zh}`;
 }
 
-// Common messages
+// ==============================================================================
+// Start / Help
+// ==============================================================================
+
+export const START_WELCOME = `Hello, I'm Dorothy for MoeNet-DN42 (AS4242420998).
+你好，我是 MoeNet-DN42 (AS4242420998) 的 桃乐丝。
+
+For more information, please check: 更多信息请查看：
+https://dn42.asn.moe/
+
+The command list is in the next message.
+指令列表在下一条消息中。
+
+You can always use /cancel to interrupt current operation.
+你始终可以使用 /cancel 终止当前正在进行的操作。
+
+When something unexpected happens or the bot can't meet your needs, please contact @HeiCha
+当出现了什么意料之外的，或者机器人无法满足你的需求，请联系 @HeiCha`;
+
+export const START_COMMANDS = `Command List 指令列表
+
+\`\`\`
+Commands
+Tools:
+- /ping [ip/domain]
+- /tcping [ip/domain] {port}
+- /trace [ip/domain]
+- /route [ip/domain]
+- /path [ip/domain]
+- /whois [something]
+- /dig [domain] {type}
+- /findnoc [asn]
+User Manage:
+- /login
+Login to verify your ASN
+登录以验证你的 ASN
+- /logout
+Logout current logged ASN
+退出当前登录的 ASN
+- /whoami
+Get current login user
+获取当前登录用户
+Peer:
+- /peer
+Set up a peer
+设置一个 Peer
+- /modify
+Modify peer information
+修改 Peer 信息
+- /remove
+Remove a peer
+移除一个 Peer
+- /info
+Show your peer info and status
+查看你的 Peer 信息及状态
+- /restart
+Restart tunnel and Bird session
+重启隧道及 Bird 会话
+Statistics:
+- /rank
+Show DN42 global ranking
+显示 DN42 总体排名
+- /stats [asn]
+Show DN42 user basic info & statistics
+显示 DN42 用户基本信息及数据
+- /peerlist [asn]
+Show the peer situation of a user
+显示某 DN42 用户的 Peer 情况
+Community:
+- /community
+Show BGP community statistics
+显示 BGP Community 统计
+- /latency [asn]
+Show peer latency probe results
+显示 Peer 延迟探测结果
+\`\`\``;
+
+// ==============================================================================
+// Login
+// ==============================================================================
+
+export const LOGIN_ASK_ASN = `Enter your ASN
+请输入你的 ASN`;
+
+export const LOGIN_CHOOSE_METHOD = `Choose authentication method. Use /cancel to interrupt.
+选择验证方式。使用 /cancel 终止操作。`;
+
+export const LOGIN_EMAIL_SENT = `✉️ Verification code has been sent to your email.
+验证码已发送至您的邮箱。
+
+Please contact @HeiCha if you can not receive it.
+如果无法收到请联系 @HeiCha
+
+Enter your verification code:
+请输入验证码：`;
+
+export const LOGIN_SUCCESS = `✅ Welcome! {mnt} AS{asn}
+欢迎你！{mnt} AS{asn}`;
+
+export const LOGIN_ALREADY = `ℹ️ You are already logged in as {mnt}
+你已登录为 {mnt}`;
+
+export const LOGIN_SIGNATURE_CHALLENGE = `🔐 Please sign this challenge with your key:
+请使用你的密钥签名以下内容：
+
+\`{challenge}\`
+
+Reply with your signature:
+回复签名结果：`;
+
+// ==============================================================================
+// Peer Wizard
+// ==============================================================================
+
+export const PEER_IDENTITY = `You will create a peer through the following identity:
+你将通过以下身份创建一个 Peer：
+*{mnt} AS{asn}*
+
+If it is wrong, please use /cancel to interrupt.
+如果有误请输入 /cancel 终止操作。
+
+Any problems, please contact @HeiCha
+如有问题，请联系 @HeiCha`;
+
+export const PEER_SELECT_NODE = `Which node do you want to choose?
+你想选择哪个节点？`;
+
+export const PEER_SELECT_ROUTES = `What routes do you want to transmit?
+你想传递哪些路由？`;
+
+export const PEER_MPBGP_SUPPORT = `Do you support Multi-Protocol BGP?
+你支持多协议 BGP 吗？`;
+
+export const PEER_MPBGP_ADDRESS = `What address for MP-BGP session?
+使用什么地址建立 MP-BGP 会话？`;
+
+export const PEER_EXT_NEXTHOP = `Do you support Extended Next Hop?
+你支持扩展的下一跳吗？`;
+
+export const PEER_INPUT_IPV6 = `Input your DN42 IPv6 address.
+请输入你的 DN42 IPv6 地址。
+
+Both Link-Local and ULA are supported.
+Link-Local 和 ULA 地址均支持。`;
+
+export const PEER_INPUT_ENDPOINT = `Input your clearnet address for WireGuard tunnel.
+请输入你用于 WireGuard 隧道的公网地址。
+
+Enter \`none\` if behind NAT.
+如果在 NAT 后面请输入 \`none\``;
+
+export const PEER_INPUT_PORT = `Input your WireGuard port.
+请输入你的 WireGuard 端口。`;
+
+export const PEER_INPUT_PUBKEY = `Input your WireGuard public key.
+请输入你的 WireGuard 公钥。`;
+
+export const PEER_INPUT_CONTACT = `Input your contact info (Telegram or Email).
+请输入你的联系方式（Telegram 或 Email）。`;
+
+export const PEER_CONFIRM = `Please check all your information:
+请确认你的信息：
+
+*Region 节点:*
+    {node}
+*Basic 基本:*
+    ASN:         {asn}
+    Channel:     {channel}
+    MP-BGP:      {mpbgp}
+    IPv6:        {ipv6}
+    IPv4:        {ipv4}
+*Tunnel 隧道:*
+    Endpoint:    {endpoint}:{port}
+    PublicKey:   \`{pubkey}\`
+*Contact 联系:*
+    {contact}
+
+Enter \`yes\` to confirm. Other input = cancel.
+确认请输入 \`yes\`，其他输入表示取消。`;
+
+export const PEER_CREATED = `✅ Peer has been created!
+Peer 已建立！
+
+Information on my side:
+我方信息：
+    Endpoint: {my_endpoint}:{my_port}
+    PublicKey: \`{my_pubkey}\`
+    DN42 Address: {my_address}`;
+
+// ==============================================================================
+// Peer Info
+// ==============================================================================
+
+export const PEER_INFO = `📍 *Node 节点:*
+    {node}
+
+📤 *Your Side 你的信息:*
+    ASN: AS{asn}
+    Endpoint: {endpoint}:{port}
+    WireGuard Key: \`{pubkey}\`
+    DN42 Address: {dn42_addr}
+
+📥 *My Side 我方信息:*
+    ASN: AS4242420998
+    Endpoint: {my_endpoint}:{my_port}
+    WireGuard Key: \`{my_pubkey}\`
+    DN42 Address: {my_addr}
+
+📡 *WireGuard Status:*
+    Latest Handshake: {handshake}
+    Transfer: {transfer}
+
+🐦 *Bird Status:*
+    {bird_status}
+
+📞 *Contact 联系:*
+    {contact}`;
+
+// ==============================================================================
+// Errors
+// ==============================================================================
+
+export const ERROR_NOT_LOGGED_IN = `❌ Please login first with /login
+请先使用 /login 登录`;
+
+export const ERROR_INVALID_ASN = `❌ Invalid ASN format
+无效的 ASN 格式`;
+
+export const ERROR_ASN_NOT_FOUND = `❌ ASN not found in DN42 registry
+在 DN42 注册表中未找到该 ASN`;
+
+export const ERROR_NO_PEER = `❌ You don't have any peer yet
+你还没有任何 Peer`;
+
+export const ERROR_PRIVILEGED_ONLY = `❌ This command is for privileged users only
+此命令仅限特权用户使用`;
+
+export const CANCELLED = `🚫 Operation cancelled.
+操作已取消。`;
+
+// ==============================================================================
+// Node List Template
+// ==============================================================================
+
+export const NODE_ITEM = `- *{code}* | {location} | {provider}
+  {open_icon} {open_text}
+  ✔️ Capacity: {current} / {max}
+  {ipv4_icon} IPv4: {ipv4_text}
+  {ipv6_icon} IPv6: {ipv6_text}`;
+
+// ==============================================================================
+// Whois
+// ==============================================================================
+
+export const WHOIS_RESULT = `📋 *WHOIS Result*
+
+\`\`\`
+{content}
+\`\`\``;
+
+export const WHOIS_NOT_FOUND = `❌ No results found for: {query}
+未找到结果：{query}`;
+
+// ==============================================================================
+// Legacy MSG object (for backward compatibility)
+// ==============================================================================
+
 export const MSG = {
     // Errors
     NOT_LOGGED_IN: {
@@ -134,4 +405,17 @@ export function fmt(
         text = text.replace(`{${key}}`, String(value));
     }
     return text;
+}
+
+/**
+ * Format template string with parameters
+ */
+export function formatString(template: string, params: Record<string, string | number | undefined>): string {
+    let result = template;
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined) {
+            result = result.replace(new RegExp(`{${key}}`, 'g'), String(value));
+        }
+    }
+    return result;
 }

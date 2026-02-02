@@ -4,37 +4,33 @@ import type { BotContext } from '../index';
 import config from '../config';
 import { isChinaIP, resolveEndpoint, CN_REJECTION_MESSAGE } from '../providers/chinaIp';
 
-interface APIResponse {
-    code: number;
-    message?: string;
-    data?: {
-        routers?: Array<{
-            uuid: string;
-            name: string;
-            isOpen: boolean;
-            location?: string;
-            region?: string;
-            endpoint?: string;
-            wgPubkey?: string;
-            nodeId?: number;
-            maxPeers?: number;
-            currentPeers?: number;
-        }>;
-        session?: {
-            uuid: string;
-            serverEndpoint?: string;
-            serverPort?: number;
-            serverPubkey?: string;
-            serverLla?: string;
-        };
-        sessions?: Array<{
-            uuid: string;
-            router: string;
-            status: number;
-        }>;
-        [key: string]: unknown;
-    };
-}
+// Import from new peer module
+import {
+    // Types
+    type APIResponse,
+    type PeerState,
+    // Step constants
+    PEER_CREATE_STEPS,
+    PEER_MODIFY_STEPS,
+    MODIFY_MENU_OPTIONS,
+    BGP_ADDRESS_OPTIONS,
+    // Validators 
+    isValidIPv6,
+    isValidWgPubkey,
+    isValidDN42IPv4,
+    isValidMTU,
+    isValidPort,
+    calculatePort,
+    parseMTU,
+    parseEndpoint,
+    // Helpers
+    BUTTONS,
+    isBackButton,
+    isAbortButton,
+    isFinishButton,
+    getFlowWithCurrent,
+    truncatePubkey,
+} from './peer/index';
 
 /**
  * API client for moenet-core
@@ -49,36 +45,6 @@ async function apiRequest(endpoint: string, method = 'POST', body?: unknown, tok
         body: body ? JSON.stringify(body) : undefined,
     });
     return response.json() as Promise<APIResponse>;
-}
-
-/**
- * Calculate user's WG port based on ASN
- */
-function calculatePort(asn: number): number {
-    if (asn >= 4242420000 && asn <= 4242429999) {
-        return 30000 + (asn % 10000);
-    } else if (asn >= 4201270000 && asn <= 4201279999) {
-        return 40000 + (asn % 10000);
-    } else {
-        return 50000 + (asn % 10000);
-    }
-}
-
-/**
- * Validate IPv6 address
- */
-function isValidIPv6(ip: string): boolean {
-    // Remove prefix if present
-    const addr = ip.includes('/') ? ip.split('/')[0] : ip;
-    // Simple validation for Link-Local and ULA
-    return /^[0-9a-f:]+$/i.test(addr || '') && (addr || '').includes(':');
-}
-
-/**
- * Validate WireGuard public key
- */
-function isValidWgPubkey(key: string): boolean {
-    return /^[A-Za-z0-9+/]{43}=$/.test(key);
 }
 
 /**
@@ -144,7 +110,7 @@ async function showModifyMenu(ctx: BotContext, isFirstTime = false) {
                     [{ text: 'Session Type' }, { text: 'WireGuard PublicKey' }],
                     [{ text: 'BGP Address' }, { text: 'PSK' }],
                     [{ text: 'MTU' }, { text: 'Contact' }],
-                    [{ text: 'Finish modification' }, { text: 'Abort modification' }],
+                    [{ text: BUTTONS.FINISH }, { text: BUTTONS.ABORT }],
                 ],
                 resize_keyboard: true,
                 one_time_keyboard: false,
@@ -538,7 +504,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 }
 
                 // Handle Abort modification
-                if (text === 'Abort modification' || text === '/cancel') {
+                if (isAbortButton(text) || text === '/cancel') {
                     ctx.session.peerFlow = undefined;
                     await ctx.reply(
                         'Abort modification, operation has been canceled.\n放弃修改，操作已取消。',
@@ -548,7 +514,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 }
 
                 // Handle Finish modification
-                if (text === 'Finish modification') {
+                if (isFinishButton(text)) {
                     const backup = flow.backup;
                     const current = flow.current;
 
@@ -573,20 +539,30 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     const diffLines: string[] = [];
                     diffLines.push('Region:');
                     diffLines.push(`    ${flow.routerName || 'Unknown'}`);
+
+                    // Basic section
                     diffLines.push('Basic:');
                     diffLines.push(`    ASN:         ${flow.asn || ''}`);
 
-                    const oldChannel = backup.mpbgp ? 'IPv6 & IPv4' : 'IPv6 only';
-                    const newChannel = current.mpbgp ? 'IPv6 & IPv4' : 'IPv6 only';
-                    if (oldChannel !== newChannel) {
-                        diffLines.push(`    Channel:     ${oldChannel}`);
+                    // Session Type (MP-BGP + ENH)
+                    const oldSession = backup.mpbgp
+                        ? (backup.extendedNexthop ? 'MP-BGP + ENH' : 'MP-BGP Only')
+                        : 'IPv6 + IPv4 (独立)';
+                    const newSession = current.mpbgp
+                        ? (current.extendedNexthop ? 'MP-BGP + ENH' : 'MP-BGP Only')
+                        : 'IPv6 + IPv4 (独立)';
+                    if (oldSession !== newSession) {
+                        diffLines.push(`    Session:     ${oldSession}`);
                         diffLines.push('  ->');
-                        diffLines.push(`      ${newChannel}`);
+                        diffLines.push(`      ${newSession}`);
                     } else {
-                        diffLines.push(`    Channel:     ${newChannel}`);
+                        diffLines.push(`    Session:     ${newSession}`);
                     }
 
-                    // IPv6 diff
+                    // BGP Address section
+                    diffLines.push('BGP Address:');
+
+                    // Peer IPv6 diff
                     if (backup.ipv6 !== current.ipv6) {
                         diffLines.push(`    Peer IPv6:   ${backup.ipv6 || 'Not set'}`);
                         diffLines.push('  ->');
@@ -595,7 +571,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         diffLines.push(`    Peer IPv6:   ${current.ipv6 || 'Not set'}`);
                     }
 
-                    // IPv4 diff
+                    // Peer IPv4 diff
                     if (backup.ipv4 !== current.ipv4) {
                         diffLines.push(`    Peer IPv4:   ${backup.ipv4 || 'Not set'}`);
                         diffLines.push('  ->');
@@ -604,7 +580,28 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         diffLines.push(`    Peer IPv4:   ${current.ipv4 || 'Not set'}`);
                     }
 
+                    // Local IPv6 diff
+                    if (backup.localIpv6 !== current.localIpv6) {
+                        diffLines.push(`    Local IPv6:  ${backup.localIpv6 || 'Not set'}`);
+                        diffLines.push('  ->');
+                        diffLines.push(`      ${current.localIpv6 || 'Not set'}`);
+                    } else {
+                        diffLines.push(`    Local IPv6:  ${current.localIpv6 || 'Not set'}`);
+                    }
+
+                    // Local IPv4 diff
+                    if (backup.localIpv4 !== current.localIpv4) {
+                        diffLines.push(`    Local IPv4:  ${backup.localIpv4 || 'Not set'}`);
+                        diffLines.push('  ->');
+                        diffLines.push(`      ${current.localIpv4 || 'Not set'}`);
+                    } else {
+                        diffLines.push(`    Local IPv4:  ${current.localIpv4 || 'Not set'}`);
+                    }
+
+                    // Tunnel section
                     diffLines.push('Tunnel:');
+
+                    // Endpoint diff
                     const oldEndpoint = backup.endpoint ? `${backup.endpoint}:${backup.port}` : 'Not set';
                     const newEndpoint = current.endpoint ? `${current.endpoint}:${current.port}` : 'Not set';
                     if (oldEndpoint !== newEndpoint) {
@@ -615,14 +612,44 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         diffLines.push(`    Endpoint:    ${newEndpoint}`);
                     }
 
-                    // Contact diff
+                    // WG PublicKey diff
+                    const oldPubkey = backup.pubkey ? backup.pubkey.slice(0, 20) + '...' : 'Not set';
+                    const newPubkey = current.pubkey ? current.pubkey.slice(0, 20) + '...' : 'Not set';
+                    if (backup.pubkey !== current.pubkey) {
+                        diffLines.push(`    WG Pubkey:   ${oldPubkey}`);
+                        diffLines.push('  ->');
+                        diffLines.push(`      ${newPubkey}`);
+                    } else {
+                        diffLines.push(`    WG Pubkey:   ${newPubkey}`);
+                    }
+
+                    // PSK diff
+                    const oldPsk = backup.psk ? 'Enabled' : 'Disabled';
+                    const newPsk = current.psk ? 'Enabled' : 'Disabled';
+                    if (backup.psk !== current.psk) {
+                        diffLines.push(`    PSK:         ${oldPsk}`);
+                        diffLines.push('  ->');
+                        diffLines.push(`      ${newPsk}`);
+                    } else {
+                        diffLines.push(`    PSK:         ${newPsk}`);
+                    }
+
+                    // MTU diff
+                    if (backup.mtu !== current.mtu) {
+                        diffLines.push(`    MTU:         ${backup.mtu}`);
+                        diffLines.push('  ->');
+                        diffLines.push(`      ${current.mtu}`);
+                    } else {
+                        diffLines.push(`    MTU:         ${current.mtu}`);
+                    }
+
+                    // Contact section
+                    diffLines.push('Contact:');
                     if (backup.contact !== current.contact) {
-                        diffLines.push('Contact:');
                         diffLines.push(`    ${backup.contact || 'Not set'}`);
                         diffLines.push('  ->');
                         diffLines.push(`      ${current.contact || 'Not set'}`);
                     } else {
-                        diffLines.push('Contact:');
                         diffLines.push(`    ${current.contact || 'Not set'}`);
                     }
 
@@ -638,6 +665,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 }
 
                 // Handle menu options - use ReplyKeyboard for sub-menus (dn42-bot style)
+                console.log(`[DEBUG modify_menu] text="${text}", checking switch cases...`);
                 switch (text) {
                     case 'Region': {
                         // Fetch available nodes and show as ReplyKeyboard
@@ -815,7 +843,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 }
 
                 try {
-                    const result = await apiRequest('/admin', 'POST', {
+                    const requestBody = {
                         action: 'updateSession',
                         uuid,
                         ipv6: current.ipv6 || null,
@@ -826,7 +854,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         mtu: current.mtu,
                         contact: current.contact || null,
                         extensions: (current.mpbgp ? 'mp_bgp' : '') + (current.extendedNexthop ? ',extended_nexthop' : ''),
-                    }, config.apiToken);
+                    };
+                    console.log('[modify_confirm] Request body:', JSON.stringify(requestBody));
+                    const result = await apiRequest('/admin', 'POST', requestBody, config.apiToken);
+                    console.log('[modify_confirm] Response:', JSON.stringify(result));
 
                     if (result.code !== 0) {
                         await ctx.reply(`❌ Failed: ${result.message}`);
@@ -840,8 +871,9 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                             { parse_mode: 'Markdown' }
                         );
                     }
-                } catch {
-                    await ctx.reply('❌ Failed to submit changes');
+                } catch (error) {
+                    console.error('[modify_confirm] Error:', error);
+                    await ctx.reply(`❌ Failed to submit changes: ${error instanceof Error ? error.message : 'Unknown error'}`);
                 }
                 ctx.session.peerFlow = undefined;
                 return;
@@ -850,7 +882,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             // === New ReplyKeyboard-based step handlers ===
 
             case 'modify_region': {
-                if (text === '🔙 Back') {
+                if (isBackButton(text)) {
                     await showModifyMenu(ctx);
                     return;
                 }
@@ -891,7 +923,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'modify_session_type': {
-                if (text === '🔙 Back') {
+                if (isBackButton(text)) {
                     await showModifyMenu(ctx);
                     return;
                 }
@@ -925,7 +957,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'modify_bgp_address': {
-                if (text === '🔙 Back') {
+                if (isBackButton(text)) {
                     await showModifyMenu(ctx);
                     return;
                 }
@@ -984,7 +1016,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'modify_psk': {
-                if (text === '🔙 Back') {
+                if (isBackButton(text)) {
                     await showModifyMenu(ctx);
                     return;
                 }
@@ -1180,10 +1212,15 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     }
                 }
 
+                const oldEndpoint = flow.backup?.endpoint
+                    ? (flow.backup?.port ? `${flow.backup.endpoint}:${flow.backup.port}` : flow.backup.endpoint)
+                    : 'none';
+                const newEndpoint = endpoint ? (port ? `${endpoint}:${port}` : endpoint) : 'none';
+
                 current.endpoint = endpoint;
                 current.port = port;
                 ctx.session.peerFlow = { ...flow, current };
-                await ctx.reply(`✅ Endpoint updated: \`${endpoint || 'none'}${port ? ':' + port : ''}\`\n端点已更新`, { parse_mode: 'Markdown' });
+                await ctx.reply(`✅ Endpoint updated!\n端点已更新\n\n\`${oldEndpoint}\` → \`${newEndpoint}\``, { parse_mode: 'Markdown' });
                 await showModifyMenu(ctx);
                 return;
             }
@@ -1200,16 +1237,19 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
+                const oldPubkey = flow.backup?.pubkey ? flow.backup.pubkey.slice(0, 20) + '...' : 'Not set';
+                const newPubkey = text.slice(0, 20) + '...';
+
                 current.pubkey = text;
                 ctx.session.peerFlow = { ...flow, current };
-                await ctx.reply(`✅ Public key updated!\n公钥已更新`);
+                await ctx.reply(`✅ Public key updated!\n公钥已更新\n\n\`${oldPubkey}\` → \`${newPubkey}\``, { parse_mode: 'Markdown' });
                 await showModifyMenu(ctx);
                 return;
             }
 
             case 'modify_mtu': {
                 // Handle '🔙 Back'
-                if (text === '🔙 Back') {
+                if (isBackButton(text)) {
                     await showModifyMenu(ctx);
                     return;
                 }
@@ -1228,9 +1268,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
+                const oldMtu = flow.backup?.mtu || 1420;
                 current.mtu = mtu;
                 ctx.session.peerFlow = { ...flow, current };
-                await ctx.reply(`✅ MTU updated to ${mtu}!\nMTU 已更新为 ${mtu}`);
+                await ctx.reply(`✅ MTU updated!\nMTU 已更新\n\n\`${oldMtu}\` → \`${mtu}\``, { parse_mode: 'Markdown' });
                 await showModifyMenu(ctx);
                 return;
             }
@@ -1250,9 +1291,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
+                const oldIpv6 = flow.backup?.ipv6 || 'Not set';
                 current.ipv6 = ipv6;
                 ctx.session.peerFlow = { ...flow, current };
-                await ctx.reply(`✅ Peer IPv6 updated: \`${ipv6}\`\n对方 IPv6 已更新`, { parse_mode: 'Markdown' });
+                await ctx.reply(`✅ Peer IPv6 updated!\n对方 IPv6 已更新\n\n\`${oldIpv6}\` → \`${ipv6}\``, { parse_mode: 'Markdown' });
                 await showModifyMenu(ctx);
                 return;
             }
@@ -1270,9 +1312,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
+                const oldIpv4 = flow.backup?.ipv4 || 'Not set';
+                const newIpv4 = ipv4 === 'none' ? 'none' : ipv4;
                 current.ipv4 = ipv4 === 'none' ? '' : ipv4;
                 ctx.session.peerFlow = { ...flow, current };
-                await ctx.reply(`✅ Peer IPv4 updated: \`${ipv4}\`\n对方 IPv4 已更新`, { parse_mode: 'Markdown' });
+                await ctx.reply(`✅ Peer IPv4 updated!\n对方 IPv4 已更新\n\n\`${oldIpv4}\` → \`${newIpv4}\``, { parse_mode: 'Markdown' });
                 await showModifyMenu(ctx);
                 return;
             }
@@ -1290,9 +1334,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
+                const oldLocalIpv6 = flow.backup?.localIpv6 || 'Not set';
                 current.localIpv6 = ipv6;
                 ctx.session.peerFlow = { ...flow, current };
-                await ctx.reply(`✅ Local IPv6 updated: \`${ipv6}\`\n我方 IPv6 已更新`, { parse_mode: 'Markdown' });
+                await ctx.reply(`✅ Local IPv6 updated!\n我方 IPv6 已更新\n\n\`${oldLocalIpv6}\` → \`${ipv6}\``, { parse_mode: 'Markdown' });
                 await showModifyMenu(ctx);
                 return;
             }
@@ -1310,9 +1355,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
+                const oldLocalIpv4 = flow.backup?.localIpv4 || 'Not set';
+                const newLocalIpv4 = ipv4 === 'none' ? 'none' : ipv4;
                 current.localIpv4 = ipv4 === 'none' ? '' : ipv4;
                 ctx.session.peerFlow = { ...flow, current };
-                await ctx.reply(`✅ Local IPv4 updated: \`${ipv4}\`\n我方 IPv4 已更新`, { parse_mode: 'Markdown' });
+                await ctx.reply(`✅ Local IPv4 updated!\n我方 IPv4 已更新\n\n\`${oldLocalIpv4}\` → \`${newLocalIpv4}\``, { parse_mode: 'Markdown' });
                 await showModifyMenu(ctx);
                 return;
             }
@@ -1330,9 +1377,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
+                const oldContact = flow.backup?.contact || 'Not set';
                 current.contact = contact;
                 ctx.session.peerFlow = { ...flow, current };
-                await ctx.reply(`✅ Contact updated: ${contact}\n联系方式已更新`);
+                await ctx.reply(`✅ Contact updated!\n联系方式已更新\n\n\`${oldContact}\` → \`${contact}\``, { parse_mode: 'Markdown' });
                 await showModifyMenu(ctx);
                 return;
             }
@@ -1706,7 +1754,9 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             // Build current info display
             const channel = hasMpbgp ? 'IPv6 & IPv4' : 'IPv6 only';
             const mpbgpText = hasMpbgp ? (hasEnh ? 'IPv6 (ENH)' : 'IPv6') : 'Not supported';
-            const endpoint = session.endpoint || 'Not set';
+            const endpoint = session.endpoint
+                ? (session.port ? `${session.endpoint}:${session.port}` : session.endpoint)
+                : 'Not set';
 
             const currentInfo =
                 `\`\`\`CurrentInfo\n` +
