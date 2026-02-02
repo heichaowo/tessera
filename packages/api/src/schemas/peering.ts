@@ -79,17 +79,37 @@ export const DeleteSessionSchema = z.object({
 });
 
 /**
+ * Update session request
+ */
+export const UpdateSessionSchema = z.object({
+    action: z.literal('update'),
+    uuid: z.string().uuid('Invalid session UUID'),
+    // Optional fields that can be updated
+    ipv4: ipv4Schema.optional().nullable(),
+    ipv6: ipv6Schema.optional().nullable(),
+    ipv6LinkLocal: z.string().optional().nullable(),
+    localIpv4: ipv4Schema.optional().nullable(),
+    endpoint: z.string().optional().nullable(),
+    mtu: z.number().int().min(1280).max(9000).optional(),
+    extensions: z.string().optional().nullable(),
+    contact: z.string().max(200).optional().nullable(),
+    psk: z.string().optional().nullable(),
+});
+
+/**
  * Combined peering request schema (discriminated union by action)
  */
 export const PeeringRequestSchema = z.discriminatedUnion('action', [
     CreateSessionSchema,
     ListSessionsSchema,
     GetSessionSchema,
+    UpdateSessionSchema,
     DeleteSessionSchema,
 ]);
 
 export type CreateSessionInput = z.infer<typeof CreateSessionSchema>;
 export type ListSessionsInput = z.infer<typeof ListSessionsSchema>;
 export type GetSessionInput = z.infer<typeof GetSessionSchema>;
+export type UpdateSessionInput = z.infer<typeof UpdateSessionSchema>;
 export type DeleteSessionInput = z.infer<typeof DeleteSessionSchema>;
 export type PeeringRequest = z.infer<typeof PeeringRequestSchema>;

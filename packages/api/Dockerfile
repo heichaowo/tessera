@@ -2,17 +2,15 @@ FROM oven/bun:1
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json bun.lockb* ./
-COPY packages/api/package.json ./packages/api/
+# Copy root package file for workspace context
+COPY package.json ./
 
-# Install dependencies
-RUN bun install
-
-# Copy source
+# Copy API package files and source first
 COPY packages/api ./packages/api
 
+# Install dependencies in packages/api (after source is copied)
 WORKDIR /app/packages/api
+RUN bun install
 
 EXPOSE 3000
 

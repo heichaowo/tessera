@@ -50,8 +50,12 @@ export default async function peeringHandler(c: Context): Promise<Response> {
             return await listSessions(c, user);
         case 'get':
             return await getSession(c, parsed as GetSessionInput, user);
+        case 'update':
+            return await updateSession(c, parsed, user);
         case 'delete':
             return await deleteSession(c, parsed as DeleteSessionInput, user);
+        default:
+            return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
     }
 }
 
@@ -194,4 +198,65 @@ async function deleteSession(
     }
 
     return success(c, { message: 'Session queued for deletion' });
+}
+
+/**
+ * Update session fields
+ */
+async function updateSession(
+    c: Context,
+    input: { uuid: string;[key: string]: unknown },
+    user: JWTPayload
+): Promise<Response> {
+    const { uuid, ...updates } = input;
+
+    if (!uuid) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing uuid');
+    }
+
+    const models = getModels();
+    const asn = Number(user.asn);
+
+    // Define allowed fields for update
+    const allowedFields = [
+        'ipv4', 'ipv6', 'ipv6LinkLocal', 'localIpv4',
+        'endpoint', 'credential', 'mtu', 'extensions',
+        'contact', 'data', 'psk'
+    ];
+
+    // Build update object with only allowed fields
+    const updateData: Record<string, unknown> = {};
+    for (const field of allowedFields) {
+        if (field in updates) {
+            // Handle PSK specially - store in credential field as JSON
+            if (field === 'psk') {
+                // Parse existing credential JSON or create new
+                const credentialValue = updates[field];
+                updateData['credential'] = credentialValue ?
+                    JSON.stringify({ pubkey: null, psk: credentialValue }) : null;
+            } else if (field === 'credential') {
+                // If credential is a pubkey string
+                const credValue = updates[field] as string;
+                updateData['credential'] = credValue ?
+                    JSON.stringify({ pubkey: credValue, psk: null }) : null;
+            } else {
+                updateData[field] = updates[field];
+            }
+        }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'No valid fields to update');
+    }
+
+    const [updatedCount] = await models.bgpSessions.update(
+        updateData,
+        { where: { uuid, asn } }
+    );
+
+    if (!updatedCount) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
+    }
+
+    return success(c, { message: 'Session updated successfully' });
 }

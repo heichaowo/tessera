@@ -88,6 +88,10 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await rejectSession(c, body);
         case 'deleteSession':
             return await deleteSessionAdmin(c, body);
+        case 'getSession':
+            return await getSessionAdmin(c, body);
+        case 'updateSession':
+            return await updateSessionAdmin(c, body);
         case 'setMaintenance':
             return await setMaintenance(c, body);
         default:
@@ -315,14 +319,17 @@ async function deleteRouter(c: Context, body: { router?: string; name?: string }
 }
 
 /**
- * List all sessions (optionally filtered by status)
+ * List all sessions (optionally filtered by status and/or asn)
  */
-async function enumSessions(c: Context, body: { status?: number }): Promise<Response> {
+async function enumSessions(c: Context, body: { status?: number; asn?: number }): Promise<Response> {
     const models = getModels();
 
     const whereClause: Record<string, unknown> = {};
     if (body.status !== undefined) {
         whereClause.status = body.status;
+    }
+    if (body.asn !== undefined) {
+        whereClause.asn = body.asn;
     }
 
     const sessions = await models.bgpSessions.findAll({
@@ -403,6 +410,81 @@ async function deleteSessionAdmin(c: Context, body: { uuid?: string }): Promise<
     }
 
     return success(c, { message: 'Session queued for deletion' });
+}
+
+/**
+ * Get a single session by uuid (for admin/bot)
+ */
+async function getSessionAdmin(c: Context, body: { uuid?: string }): Promise<Response> {
+    if (!body.uuid) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing uuid');
+    }
+
+    const models = getModels();
+
+    const session = await models.bgpSessions.findOne({
+        where: { uuid: body.uuid },
+    });
+
+    if (!session) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
+    }
+
+    // Get router name
+    const router = await models.routers.findOne({
+        where: { uuid: session.get('router') as string },
+    });
+    const routerName = router?.get('name') || session.get('router');
+
+    return success(c, {
+        session: {
+            ...session.get(),
+            routerName,
+        },
+    });
+}
+
+/**
+ * Update session fields (for bot/admin)
+ */
+async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string]: unknown }): Promise<Response> {
+    const { uuid, ...updates } = body;
+
+    if (!uuid) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing uuid');
+    }
+
+    const models = getModels();
+
+    // Define allowed fields for update
+    const allowedFields = [
+        'ipv4', 'ipv6', 'ipv6LinkLocal', 'localIpv4',
+        'endpoint', 'credential', 'mtu', 'extensions',
+        'contact', 'data', 'psk'
+    ];
+
+    // Build update object with only allowed fields
+    const updateData: Record<string, unknown> = {};
+    for (const field of allowedFields) {
+        if (field in updates) {
+            updateData[field] = updates[field];
+        }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'No valid fields to update');
+    }
+
+    // Verify session exists
+    const session = await models.bgpSessions.findOne({ where: { uuid } });
+    if (!session) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
+    }
+
+    // Update session
+    await models.bgpSessions.update(updateData, { where: { uuid } });
+
+    return success(c, { message: 'Session updated' });
 }
 
 /**

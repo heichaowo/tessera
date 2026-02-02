@@ -34,12 +34,14 @@ export interface BgpSessionAttributes {
     ipv4: string | null;
     ipv6: string | null;
     ipv6LinkLocal: string | null;
+    localIpv4: string | null;
     type: string;
     extensions: string | null;
     interface: string;
     endpoint: string | null;
     credential: string | null;
     data: string | null;
+    contact: string | null;
     lastError: string | null;
     createdAt?: Date;
     updatedAt?: Date;
@@ -90,6 +92,11 @@ export function initBgpSessionsModel(sequelize: Sequelize): BgpSessionsModel {
             type: DataTypes.STRING,
             allowNull: true,
         },
+        localIpv4: {
+            field: 'local_ipv4',
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
         type: {
             type: DataTypes.STRING,
             allowNull: false,
@@ -113,6 +120,10 @@ export function initBgpSessionsModel(sequelize: Sequelize): BgpSessionsModel {
         },
         data: {
             type: DataTypes.TEXT,
+            allowNull: true,
+        },
+        contact: {
+            type: DataTypes.STRING,
             allowNull: true,
         },
         lastError: {

@@ -11,13 +11,13 @@ import path from 'path';
 
 // Inline messages (previously from i18n)
 const MSG = {
-    LOGIN_ALREADY: (asn: number) => `✅ Already logged in as AS${asn}\\n已登录 AS${asn}`,
-    LOGIN_ASK_ASN: '🔐 Please enter your ASN:\\n请输入你的 ASN:\\n\\nExample: `4242420998`',
-    LOGIN_CHOOSE_METHOD: 'Choose authentication method:\\n选择认证方式:',
-    LOGIN_SUCCESS: (asn: number) => `✅ Login successful! Welcome AS${asn}\\n登录成功! 欢迎 AS${asn}`,
+    LOGIN_ALREADY: (asn: number) => `✅ Already logged in as AS${asn}\n已登录 AS${asn}`,
+    LOGIN_ASK_ASN: '🔐 Please enter your ASN:\n请输入你的 ASN:\n\nExample: `4242420998`',
+    LOGIN_CHOOSE_METHOD: 'Choose authentication method:\n选择认证方式:',
+    LOGIN_SUCCESS: (asn: number) => `✅ Login successful! Welcome AS${asn}\n登录成功! 欢迎 AS${asn}`,
     ERROR_INVALID_ASN: '❌ Invalid ASN. DN42 range: 4242420000-4242429999',
-    ERROR_NOT_LOGGED_IN: '❌ Please /login first\\n请先登录',
-    CANCELLED: '🚫 Cancelled\\n已取消',
+    ERROR_NOT_LOGGED_IN: '❌ Please /login first\n请先登录',
+    CANCELLED: '🚫 Cancelled\n已取消',
 };
 
 const execAsync = promisify(exec);

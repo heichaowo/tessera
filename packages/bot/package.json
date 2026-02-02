@@ -12,6 +12,7 @@
         "@grammyjs/menu": "^1.2.0",
         "@grammyjs/storage-free": "^2.4.2",
         "hono": "^4.6.0",
-        "ioredis": "^5.4.1"
+        "ioredis": "^5.4.1",
+        "ip-address": "^9.0.5"
     }
 }

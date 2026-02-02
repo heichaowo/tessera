@@ -32,6 +32,36 @@ interface SessionData {
         mtu?: number;
         psk?: string | null;
         nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number }>;
+        // For modify flow - diff tracking (dn42-bot style)
+        asn?: number;
+        backup?: {
+            endpoint: string;
+            port: string;
+            ipv6: string;
+            ipv4: string;
+            localIpv6: string;
+            localIpv4: string;
+            pubkey: string;
+            psk: boolean;
+            mtu: number;
+            mpbgp: boolean;
+            extendedNexthop: boolean;
+            contact: string;
+        };
+        current?: {
+            endpoint: string;
+            port: string;
+            ipv6: string;
+            ipv4: string;
+            localIpv6: string;
+            localIpv4: string;
+            pubkey: string;
+            psk: boolean;
+            mtu: number;
+            mpbgp: boolean;
+            extendedNexthop: boolean;
+            contact: string;
+        };
     };
     nodeWizard?: {
         step: 'name' | 'hostname' | 'ipv4' | 'ipv6' | 'role' | 'region' | 'location' | 'provider' | 'bandwidth' | 'max_peers' | 'allow_cn' | 'confirm';
