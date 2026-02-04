@@ -39,6 +39,8 @@ interface APIResponse {
             type: number;
             value?: string;
             fingerprint?: string;
+            name?: string;
+            data?: string;
         }>;
         [key: string]: unknown;
     };
@@ -410,14 +412,20 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             const emails: string[] = [];
 
             for (const method of availableAuthMethods) {
-                if (method.type === 1 && method.fingerprint) {
-                    gpgFingerprints.push(method.fingerprint);
-                } else if (method.type === 2 && method.value) {
-                    sshKeys.push(method.value);
-                } else if (method.type === 3 && method.value) {
-                    emails.push(method.value);
+                // Handle both formats: {type, value/fingerprint} and {type, name/data}
+                const val = method.value || method.name || method.data || method.fingerprint;
+                if (method.type === 1 && val) {
+                    gpgFingerprints.push(val);
+                } else if (method.type === 2 && val) {
+                    sshKeys.push(val);
+                } else if (method.type === 3 && val) {
+                    emails.push(val);
                 }
             }
+
+            // Debug: log what we received
+            console.log('[Login] availableAuthMethods:', JSON.stringify(availableAuthMethods));
+            console.log('[Login] Parsed - GPG:', gpgFingerprints.length, 'SSH:', sshKeys.length, 'Email:', emails.length);
 
             // Build auth method keyboard
             const keyboard = new InlineKeyboard();
@@ -431,6 +439,9 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             if (emails.length > 0) {
                 keyboard.text('📧 Email 邮箱', `login:email:${asn}`).row();
             }
+
+            // Debug: log keyboard state
+            console.log('[Login] Keyboard inline_keyboard:', JSON.stringify(keyboard));
 
             // Store available auth data
             challengeStore.set(ctx.from.id, {
