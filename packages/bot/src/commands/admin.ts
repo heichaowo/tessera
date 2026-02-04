@@ -311,7 +311,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
             // Build keyboard
             const keyboard = new InlineKeyboard();
-            const nodeMap: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number }> = {};
+            const nodeMap: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number }> = {};
 
             routers.forEach((r, i) => {
                 const label = r.name;
@@ -322,6 +322,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                     endpoint: r.endpoint || r.name,
                     pubkey: r.wgPubkey || 'N/A',
                     nodeId: r.nodeId || 0,
+                    regionCode: r.regionCode || 0,
                 };
             });
 
@@ -454,6 +455,7 @@ interface RouterInfo {
     endpoint?: string;
     wgPubkey?: string;
     nodeId?: number;
+    regionCode?: number;
     maxPeers?: number;
     supportsIpv4?: boolean;
     supportsIpv6?: boolean;

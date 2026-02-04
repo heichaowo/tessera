@@ -154,6 +154,7 @@ export interface RouterData {
     endpoint?: string;
     wgPubkey?: string;
     nodeId?: number;
+    regionCode?: number;
     maxPeers?: number;
     currentPeers?: number;
 }

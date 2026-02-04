@@ -80,13 +80,21 @@ moenet-core/
 │           ├── middleware.ts   # Rate limiting, metrics
 │           ├── storage.ts      # Redis session adapter
 │           ├── i18n.ts         # Bilingual (EN/ZH)
-│           └── commands/
-│               ├── user.ts     # /start, /help, /login
-│               ├── peer.ts     # /peer, /info, /modify
-│               ├── tools.ts    # /ping, /trace, /whois
-│               ├── admin.ts    # /pending, /block
-│               ├── nodes.ts    # /addnode, /bootstrap
-│               └── help.ts     # Command help
+│           ├── commands/
+│           │   ├── user.ts     # /start, /help, /login
+│           │   ├── peer.ts     # /peer, /info, /modify
+│           │   ├── peer/       # Modular peer handlers
+│           │   │   ├── handlers/   # Callback handlers
+│           │   │   ├── ui.ts       # UI prompt helpers
+│           │   │   └── api.ts      # Shared API client
+│           │   ├── tools.ts    # /ping, /trace, /whois
+│           │   ├── admin.ts    # /pending, /block
+│           │   ├── nodes.ts    # /addnode, /bootstrap
+│           │   └── help.ts     # Command help
+│           ├── providers/
+│           │   └── chinaIp.ts  # China IP detection
+│           └── services/
+│               └── dn42Validator.ts # IP ownership validation
 │
 ├── docker-compose.yml          # Full stack deployment
 ├── prometheus.yml              # Prometheus config

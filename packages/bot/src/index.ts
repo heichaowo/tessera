@@ -26,12 +26,14 @@ interface SessionData {
         sessionType?: 'ipv6_only' | 'ipv6_ipv4';
         ipv6?: string;
         localIpv6?: string;
+        ipv4?: string;
+        localIpv4?: string;
         endpoint?: string;
         port?: number;
         publicKey?: string;
         mtu?: number;
         psk?: string | null;
-        nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number }>;
+        nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number }>;
         // For modify flow - diff tracking (dn42-bot style)
         asn?: number;
         backup?: {

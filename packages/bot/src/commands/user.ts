@@ -423,13 +423,13 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             const keyboard = new InlineKeyboard();
 
             if (gpgFingerprints.length > 0) {
-                keyboard.text('🔐 GPG Signature GPG 签名', `login:gpg:${asn}`);
+                keyboard.text('🔐 GPG Signature GPG 签名', `login:gpg:${asn}`).row();
             }
             if (sshKeys.length > 0) {
-                keyboard.text('🔑 SSH Signature SSH 签名', `login:ssh:${asn}`);
+                keyboard.text('🔑 SSH Signature SSH 签名', `login:ssh:${asn}`).row();
             }
             if (emails.length > 0) {
-                keyboard.text('📧 Email 邮箱', `login:email:${asn}`);
+                keyboard.text('📧 Email 邮箱', `login:email:${asn}`).row();
             }
 
             // Store available auth data

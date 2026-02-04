@@ -23,14 +23,29 @@ packages/bot/src/
 │   ├── help.ts       # /start, /help, /cancel
 │   ├── user.ts       # /login, /logout, /whoami
 │   ├── peer.ts       # /peer, /info, /modify, /remove, /status, /restart
+│   ├── peer/         # Peer command modules
+│   │   ├── index.ts          # Module exports
+│   │   ├── api.ts            # Shared API client
+│   │   ├── ui.ts             # UI prompt helpers
+│   │   ├── constants.ts      # Step & callback IDs
+│   │   ├── helpers.ts        # Utility functions
+│   │   ├── prompts.ts        # Message templates
+│   │   └── handlers/         # Callback handlers
+│   │       ├── creation.ts   # Peer creation flow
+│   │       ├── confirm.ts    # Confirmation callbacks
+│   │       ├── modify.ts     # Modification flow
+│   │       └── remove.ts     # Removal & restart
 │   ├── tools.ts      # /ping, /trace, /whois, /dig, /route, /findnoc
 │   ├── admin.ts      # /addpeer, /pending, /nodes
 │   ├── block.ts      # /block
 │   ├── maintenance.ts # /main
 │   ├── community.ts  # /community, /latency
 │   └── stats.ts      # /stats, /rank
-└── providers/
-    └── nodes.ts      # Agent endpoint provider
+├── providers/
+│   ├── nodes.ts      # Agent endpoint provider
+│   └── chinaIp.ts    # China IP detection
+└── services/
+    └── dn42Validator.ts # DN42 IP ownership validation
 ```
 
 ## Development
