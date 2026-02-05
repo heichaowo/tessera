@@ -395,10 +395,12 @@ async function handleGlobalHeartbeat(c: Context): Promise<Response> {
         lastSeen: new Date(),
     };
 
-    // Update mesh_public_key if provided
+    // Update mesh_public_key and wg_public_key if provided
+    // Both fields use the same public key from /etc/wireguard/public.key
     if (status.meshPublicKey) {
         updatePayload.meshPublicKey = status.meshPublicKey;
-        console.log(`[Agent ${nodeId}] Updated meshPublicKey: ${status.meshPublicKey.substring(0, 20)}...`);
+        updatePayload.wgPublicKey = status.meshPublicKey;
+        console.log(`[Agent ${nodeId}] Updated meshPublicKey + wgPublicKey: ${status.meshPublicKey.substring(0, 20)}...`);
     }
 
     // Update public IPs if provided
