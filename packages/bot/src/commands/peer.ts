@@ -451,12 +451,21 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     }
 
                     ctx.session.peerFlow = { ...flow, step: 'modify_confirm' };
+
+                    // Hybrid confirmation: InlineKeyboard buttons + text "yes" fallback
+                    const confirmKeyboard = new InlineKeyboard()
+                        .text('✅ Confirm 确认', 'modify:submit')
+                        .text('❌ Cancel 取消', 'modify:cancel');
+
                     await ctx.reply(
                         'Please check all your information\n请确认你的信息\n\n' +
                         '```ConfirmInfo\n' + diffLines.join('\n') + '\n```\n\n' +
-                        'Please enter `yes` to confirm. All other inputs cancel.\n' +
-                        '确认无误请输入 `yes`，其他输入表示取消。',
-                        { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
+                        'Click button or type `yes` to confirm.\n' +
+                        '点击按钮或输入 `yes` 确认。',
+                        {
+                            parse_mode: 'Markdown',
+                            reply_markup: confirmKeyboard
+                        }
                     );
                     return;
                 }
@@ -1109,8 +1118,92 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'confirm': {
-                // Text during confirm step - ignore, they should use buttons
-                await ctx.reply('Please use the buttons above to confirm or cancel.\n请使用上方按钮确认或取消');
+                // Hybrid confirmation: support both InlineKeyboard button AND text "yes"
+                if (text.toLowerCase() === 'yes') {
+                    // Trigger confirmation logic (same as peer:confirm callback)
+                    const asn = flow.isAdminMode ? flow.targetAsn : ctx.session.asn;
+                    if (!asn) {
+                        ctx.session.peerFlow = undefined;
+                        return;
+                    }
+
+                    await ctx.reply('⏳ Creating peer...\n正在创建 Peer...');
+
+                    try {
+                        const action = flow.isAdminMode ? 'adminCreate' : 'create';
+                        const result = await apiRequest('/admin', 'POST', {
+                            action,
+                            asn,
+                            router: flow.routerUuid,
+                            ipv6: flow.ipv6,
+                            endpoint: flow.endpoint && flow.port ? `${flow.endpoint}:${flow.port}` : undefined,
+                            publicKey: flow.publicKey,
+                            mtu: flow.mtu || 1420,
+                            psk: flow.psk,
+                            status: flow.isAdminMode ? 1 : undefined,
+                        }, config.apiToken);
+
+                        if (result.code !== 0) {
+                            await ctx.reply(`❌ Failed to create peer: ${result.message}`);
+                            ctx.session.peerFlow = undefined;
+                            return;
+                        }
+
+                        const statusText = flow.isAdminMode
+                            ? `✅ Status: ACTIVE (免审核)`
+                            : `⏳ Status: Pending Review\n等待管理员审核`;
+
+                        const successText =
+                            `🎉 *Peer Created Successfully!*\n成功创建 Peer!\n\n` +
+                            `📍 Node: \`${flow.routerName}\`\n` +
+                            `🆔 ASN: \`AS${asn}\`\n\n` +
+                            `*Your WireGuard Config:*\n` +
+                            `\`\`\`\n` +
+                            `[Peer]\n` +
+                            `PublicKey = ${flow.serverPubkey}\n` +
+                            `Endpoint = ${flow.serverEndpoint}:${flow.serverPort}\n` +
+                            `AllowedIPs = 172.20.0.0/14, 172.31.0.0/16, fd00::/8, fe80::/64\n` +
+                            `\`\`\`\n\n` +
+                            statusText;
+
+                        await ctx.reply(successText, { parse_mode: 'Markdown' });
+
+                        // Notify admin if not in admin mode
+                        if (!flow.isAdminMode && config.adminChatId) {
+                            try {
+                                const adminNotification =
+                                    `🔔 *New Peer Request*\n新的 Peer 申请\n\n` +
+                                    `🆔 ASN: \`AS${asn}\`\n` +
+                                    `📍 Node: \`${flow.routerName}\`\n` +
+                                    `🌐 IPv6: \`${flow.ipv6}\`\n` +
+                                    `📡 Endpoint: ${flow.endpoint ? `\`${flow.endpoint}:${flow.port}\`` : 'NAT'}\n\n` +
+                                    `Use /pending to review`;
+
+                                await ctx.api.sendMessage(config.adminChatId, adminNotification, {
+                                    parse_mode: 'Markdown',
+                                    reply_markup: new InlineKeyboard()
+                                        .text('📋 View Pending', 'admin:pending')
+                                });
+                            } catch (e) {
+                                console.error('[Notify Admin] Error:', e);
+                            }
+                        }
+
+                        ctx.session.peerFlow = undefined;
+                    } catch (error) {
+                        console.error('[Peer] Create error:', error);
+                        await ctx.reply('❌ Failed to create peer.');
+                        ctx.session.peerFlow = undefined;
+                    }
+                    return;
+                }
+
+                // Other text during confirm step - remind about options
+                await ctx.reply(
+                    'Please use the buttons above OR type `yes` to confirm.\n' +
+                    '请使用上方按钮或输入 `yes` 确认',
+                    { parse_mode: 'Markdown' }
+                );
                 break;
             }
 
@@ -1337,6 +1430,47 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 ctx.session.peerFlow = { ...flow, current };
                 await ctx.reply(`✅ Contact updated!\n联系方式已更新\n\n\`${oldContact}\` → \`${contact}\``, { parse_mode: 'Markdown' });
                 await showModifyMenu(ctx);
+                return;
+            }
+
+            // Remove confirmation: hybrid (InlineKeyboard + text "yes")
+            case 'remove_confirm': {
+                if (text.toLowerCase() === 'yes') {
+                    const uuid = flow.routerUuid;
+                    if (!uuid) {
+                        ctx.session.peerFlow = undefined;
+                        await ctx.reply('❌ Error: No session to remove');
+                        return;
+                    }
+
+                    await ctx.reply('⏳ Removing peer...\n正在删除 Peer...');
+
+                    try {
+                        const result = await apiRequest('/admin', 'POST', {
+                            action: 'delete',
+                            uuid,
+                        }, config.apiToken);
+
+                        if (result.code !== 0) {
+                            await ctx.reply(`❌ Failed to remove: ${result.message}`);
+                        } else {
+                            await ctx.reply('✅ Peer removed successfully!\n成功删除 Peer!');
+                        }
+                    } catch (error) {
+                        console.error('[Remove] Text confirm error:', error);
+                        await ctx.reply('❌ Failed to remove peer.');
+                    }
+
+                    ctx.session.peerFlow = undefined;
+                    return;
+                }
+
+                // Other text - remind about options
+                await ctx.reply(
+                    'Please use the buttons above OR type `yes` to confirm deletion.\n' +
+                    '请使用上方按钮或输入 `yes` 确认删除',
+                    { parse_mode: 'Markdown' }
+                );
                 return;
             }
 

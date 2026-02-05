@@ -23,6 +23,12 @@ export function registerRemoveHandlers(bot: Bot<BotContext>) {
 
         await ctx.answerCallbackQuery();
 
+        // Set session step for hybrid confirmation (text "yes" fallback)
+        ctx.session.peerFlow = {
+            step: 'remove_confirm',
+            routerUuid: uuid,
+        };
+
         const keyboard = new InlineKeyboard()
             .text('✅ Confirm Delete 确认删除', `remove:confirm:${uuid}`)
             .text('❌ Cancel 取消', 'remove:cancel');
@@ -31,7 +37,9 @@ export function registerRemoveHandlers(bot: Bot<BotContext>) {
             `⚠️ *Confirm Deletion*\n确认删除\n\n` +
             `Are you sure you want to remove this peer?\n` +
             `确定要删除此 Peer 吗?\n\n` +
-            `Session: \`${uuid.slice(0, 8)}...\``,
+            `Session: \`${uuid.slice(0, 8)}...\`\n\n` +
+            `Click button or type \`yes\` to confirm.\n` +
+            `点击按钮或输入 \`yes\` 确认。`,
             { parse_mode: 'Markdown', reply_markup: keyboard }
         );
     });

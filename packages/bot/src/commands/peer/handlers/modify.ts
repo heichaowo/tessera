@@ -48,6 +48,81 @@ export function registerModifyHandlers(
     });
 
     /**
+     * Handle modify submit - submit all pending modifications
+     */
+    bot.callbackQuery('modify:submit', async (ctx) => {
+        const flow = ctx.session.peerFlow;
+        const uuid = flow?.routerUuid;
+        const current = flow?.current;
+        const backup = flow?.backup;
+
+        if (!uuid || !current || !backup) {
+            ctx.session.peerFlow = undefined;
+            await ctx.answerCallbackQuery('Error: No session data');
+            await ctx.editMessageText('❌ Error: No session data');
+            return;
+        }
+
+        await ctx.answerCallbackQuery('Submitting changes...');
+        await ctx.editMessageText('⏳ Submitting changes...\n正在提交更改...');
+
+        try {
+            // Build request with only changed fields
+            const requestBody: Record<string, unknown> = {
+                action: 'updateSession',
+                uuid,
+            };
+
+            if (current.ipv6 !== backup.ipv6) {
+                requestBody.ipv6 = current.ipv6 || null;
+            }
+            if (current.ipv4 !== backup.ipv4) {
+                requestBody.ipv4 = current.ipv4 || null;
+            }
+            if (current.localIpv6 !== backup.localIpv6) {
+                requestBody.ipv6LinkLocal = current.localIpv6 || null;
+            }
+            if (current.localIpv4 !== backup.localIpv4) {
+                requestBody.localIpv4 = current.localIpv4 || null;
+            }
+            if (current.endpoint !== backup.endpoint) {
+                requestBody.endpoint = current.endpoint || null;
+            }
+            if (current.mtu !== backup.mtu) {
+                requestBody.mtu = current.mtu;
+            }
+            if (current.contact !== backup.contact) {
+                requestBody.contact = current.contact || null;
+            }
+            if (current.mpbgp !== backup.mpbgp || current.extendedNexthop !== backup.extendedNexthop) {
+                requestBody.extensions = (current.mpbgp ? 'mp_bgp' : '') + (current.extendedNexthop ? ',extended_nexthop' : '');
+            }
+
+            console.log('[modify:submit] Request body:', JSON.stringify(requestBody));
+            const result = await apiRequest('/admin', 'POST', requestBody, config.apiToken);
+            console.log('[modify:submit] Response:', JSON.stringify(result));
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Failed: ${result.message}`);
+            } else {
+                await ctx.reply(
+                    `✅ Modification submitted successfully!\n` +
+                    `修改已成功提交！\n\n` +
+                    `Node: \`${flow.routerName}\`\n` +
+                    `Changes will be applied within a few minutes.\n` +
+                    `更改将在几分钟内生效。`,
+                    { parse_mode: 'Markdown' }
+                );
+            }
+        } catch (error) {
+            console.error('[modify:submit] Error:', error);
+            await ctx.reply(`❌ Failed to submit changes: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+
+        ctx.session.peerFlow = undefined;
+    });
+
+    /**
      * Handle modify:back - dismiss the inline keyboard
      */
     bot.callbackQuery('modify:back', async (ctx) => {
