@@ -23,6 +23,50 @@ import {
  */
 export function registerCreationHandlers(bot: Bot<BotContext>) {
     /**
+     * Handle node selection from InlineKeyboard (used by /addpeer command)
+     */
+    bot.callbackQuery(/^peer:node:(.+)$/, async (ctx) => {
+        const nodeName = ctx.match?.[1];
+        const flow = ctx.session.peerFlow;
+        if (!nodeName || !flow?.nodeMap) return;
+
+        const nodeInfo = flow.nodeMap[nodeName];
+        if (!nodeInfo) {
+            await ctx.answerCallbackQuery({ text: 'Invalid node' });
+            return;
+        }
+
+        const asn = ctx.session.asn || 0;
+        // Calculate port based on ASN
+        let userPort: number;
+        if (asn >= 4242420000 && asn <= 4242429999) {
+            userPort = 30000 + (asn % 10000);
+        } else if (asn >= 4201270000 && asn <= 4201279999) {
+            userPort = 40000 + (asn % 10000);
+        } else {
+            userPort = 50000 + (asn % 10000);
+        }
+
+        ctx.session.peerFlow = {
+            ...flow,
+            step: 'await_continue',
+            routerName: nodeName,
+            routerUuid: nodeInfo.uuid,
+            serverEndpoint: `${nodeName}.dn42.moenet.work`,
+            serverPort: userPort,
+            serverPubkey: nodeInfo.pubkey,
+            serverLla: `fe80::998:${nodeInfo.regionCode}:${nodeInfo.nodeId}:1`,
+        };
+
+        await ctx.answerCallbackQuery();
+        await ctx.editMessageText(`✅ Selected: ${nodeName}`);
+
+        // Import and call showServerWgInfo
+        const { showServerWgInfo } = await import('../ui');
+        await showServerWgInfo(ctx);
+    });
+
+    /**
      * Handle IPv6 quick select from InlineKeyboard suggestion button
      * (User can also type IPv6 directly, handled in peer.ts text handler)
      */
