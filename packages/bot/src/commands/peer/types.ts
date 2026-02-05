@@ -152,7 +152,7 @@ export interface RouterData {
     location?: string;
     region?: string;
     endpoint?: string;
-    wgPubkey?: string;
+    wgPublicKey?: string;
     nodeId?: number;
     regionCode?: number;
     maxPeers?: number;

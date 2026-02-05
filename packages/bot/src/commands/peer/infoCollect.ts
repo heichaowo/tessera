@@ -206,7 +206,7 @@ export async function postRegion(
 
         // Build WG info display
         const endpoint = nodeInfo.endpoint || nodeName;
-        const pubkey = nodeInfo.wgPubkey || 'N/A';
+        const pubkey = nodeInfo.wgPublicKey || 'N/A';
         const nodeId = nodeInfo.nodeId || 0;
         const regionCode = nodeInfo.regionCode || 0;
         const ourLla = `fe80::998:${regionCode}:${nodeId}:1`;

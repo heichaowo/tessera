@@ -192,8 +192,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     peerableNodes.push(label);
                     nodeMap[label] = {
                         uuid: r.uuid,
-                        endpoint: r.endpoint || r.name,
-                        pubkey: r.wgPubkey || 'N/A',
+                        endpoint: `${r.name}.dn42.moenet.work`,
+                        pubkey: r.wgPublicKey || 'N/A',
                         nodeId: r.nodeId || 0,
                         regionCode: r.regionCode || 0,
                     };
@@ -356,8 +356,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 // Handle session type selection from ReplyKeyboard
                 if (text.includes('MP-BGP') || text.includes('ENH')) {
                     ctx.session.peerFlow = { ...flow, step: 'input_ipv6', sessionType: 'ipv6_only' };
-                    const asn = ctx.session.asn || 0;
-                    const suggested = `fe80::${asn % 10000}`;
+                    // Suggest fe80::998 for consistent LLA peering
+                    const suggested = `fe80::998`;
                     await ctx.reply(`✅ Session Type: *MP-BGP + ENH*`, { parse_mode: 'Markdown' });
                     await promptIpv6(ctx, suggested);
                     return;

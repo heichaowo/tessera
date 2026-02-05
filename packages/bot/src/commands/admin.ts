@@ -320,7 +320,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 nodeMap[label] = {
                     uuid: r.uuid,
                     endpoint: r.endpoint || r.name,
-                    pubkey: r.wgPubkey || 'N/A',
+                    pubkey: r.wgPublicKey || 'N/A',
                     nodeId: r.nodeId || 0,
                     regionCode: r.regionCode || 0,
                 };
@@ -453,7 +453,7 @@ interface RouterInfo {
     sessionCount: number;
     isOpen: boolean;
     endpoint?: string;
-    wgPubkey?: string;
+    wgPublicKey?: string;
     nodeId?: number;
     regionCode?: number;
     maxPeers?: number;
