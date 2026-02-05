@@ -1,5 +1,5 @@
 import type { Bot } from 'grammy';
-import { InlineKeyboard } from 'grammy';
+import { InlineKeyboard, Keyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
 import { isChinaIP, resolveEndpoint, CN_REJECTION_MESSAGE } from '../providers/chinaIp';
@@ -33,6 +33,9 @@ import {
     truncatePubkey,
     // UI helpers
     showServerWgInfo,
+    promptSessionType,
+    promptIpv6,
+    promptUlaIpv6,
     promptEndpoint,
     promptPubkey,
     promptMtu,
@@ -247,13 +250,14 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            // Build keyboard for node selection
-            const keyboard = new InlineKeyboard();
+            // Build ReplyKeyboard for node selection
+            const keyboard = new Keyboard();
             peerableNodes.forEach((label, i) => {
                 const nodeName = (label || '').split(' (')[0] || '';
-                keyboard.text(nodeName, `peer:node:${label || ''}`);
+                keyboard.text(nodeName);
                 if ((i + 1) % 2 === 0) keyboard.row();
             });
+            keyboard.resized().oneTime();
 
             ctx.session.peerFlow = {
                 step: 'select_node',
@@ -292,6 +296,130 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         }
 
         switch (flow.step) {
+            // ===== Creation wizard ReplyKeyboard handlers =====
+            case 'select_node': {
+                // Handle node selection from ReplyKeyboard
+                const nodeMap = flow.nodeMap;
+                if (!nodeMap) {
+                    await ctx.reply('❌ Error: Node map not found', { reply_markup: { remove_keyboard: true } });
+                    ctx.session.peerFlow = undefined;
+                    return;
+                }
+
+                // Find matching node by name
+                const matchedLabel = Object.keys(nodeMap).find(label => {
+                    const nodeName = label.split(' (')[0] || '';
+                    return nodeName.toLowerCase() === text.toLowerCase();
+                });
+
+                if (!matchedLabel) {
+                    await ctx.reply('❌ Invalid node. Please select from the list.\n无效节点，请从列表中选择。', { reply_markup: { remove_keyboard: true } });
+                    return;
+                }
+
+                const nodeInfo = nodeMap[matchedLabel];
+                if (!nodeInfo) {
+                    await ctx.reply('❌ Node info not found', { reply_markup: { remove_keyboard: true } });
+                    return;
+                }
+
+                const asn = ctx.session.asn || 0;
+                const userPort = calculatePort(asn);
+
+                ctx.session.peerFlow = {
+                    ...flow,
+                    step: 'await_continue',
+                    routerName: matchedLabel.split(' (')[0],
+                    routerUuid: nodeInfo.uuid,
+                    serverEndpoint: nodeInfo.endpoint,
+                    serverPort: userPort,
+                    serverPubkey: nodeInfo.pubkey,
+                    serverLla: `fe80::998:${nodeInfo.regionCode}:${nodeInfo.nodeId}:1`,
+                };
+
+                await ctx.reply(`✅ Selected: ${matchedLabel}`, { reply_markup: { remove_keyboard: true } });
+                await showServerWgInfo(ctx);
+                return;
+            }
+
+            case 'await_continue': {
+                // Handle "Continue" button from ReplyKeyboard
+                if (text.includes('Continue') || text.includes('继续')) {
+                    await promptSessionType(ctx);
+                    return;
+                }
+                await ctx.reply('Please click the "Continue" button to proceed.\n请点击 "Continue 继续" 按钮继续。');
+                return;
+            }
+
+            case 'select_session_type': {
+                // Handle session type selection from ReplyKeyboard
+                if (text.includes('MP-BGP') || text.includes('ENH')) {
+                    ctx.session.peerFlow = { ...flow, step: 'input_ipv6', sessionType: 'ipv6_only' };
+                    const asn = ctx.session.asn || 0;
+                    const suggested = `fe80::${asn % 10000}`;
+                    await ctx.reply(`✅ Session Type: *MP-BGP + ENH*`, { parse_mode: 'Markdown' });
+                    await promptIpv6(ctx, suggested);
+                    return;
+                }
+                if (text.includes('ULA') || text.includes('GUA')) {
+                    ctx.session.peerFlow = { ...flow, step: 'input_peer_ipv6_ula', sessionType: 'ipv6_ipv4' };
+                    await ctx.reply(`✅ Session Type: *ULA/GUA Mode*`, { parse_mode: 'Markdown' });
+                    await promptUlaIpv6(ctx);
+                    return;
+                }
+                await ctx.reply('Please select a session type.\n请选择会话类型。');
+                return;
+            }
+
+            case 'input_mtu': {
+                // Handle MTU selection from ReplyKeyboard - use button text exact matches
+                const mtuButtons: Record<string, number> = {
+                    '1420 (默认)': 1420,
+                    '1400': 1400,
+                    '1380': 1380,
+                    '1280': 1280,
+                };
+                let mtu = mtuButtons[text];
+                if (!mtu) {
+                    // Custom MTU input - parse directly
+                    const parsed = parseInt(text, 10);
+                    if (isNaN(parsed) || parsed < 1280 || parsed > 1500) {
+                        await ctx.reply('❌ Invalid MTU. Please enter 1280-1500.\n无效的 MTU，请输入 1280-1500');
+                        return;
+                    }
+                    mtu = parsed;
+                }
+                ctx.session.peerFlow = { ...flow, step: 'input_psk', mtu };
+                await ctx.reply(`✅ MTU: \`${mtu}\``, { parse_mode: 'Markdown' });
+                await promptPsk(ctx);
+                return;
+            }
+
+            case 'input_psk': {
+                // Handle PSK selection from ReplyKeyboard
+                if (text.includes('Auto') || text.includes('Generate') || text.includes('自动')) {
+                    const psk = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
+                    ctx.session.peerFlow = { ...flow, step: 'confirm', psk };
+                    await ctx.reply(
+                        `🔑 *PSK Generated*\n\n\`${psk}\`\n\n` +
+                        `⚠️ Save this key! You need it on your side.\n` +
+                        `请保存此密钥，稍后配置时需要。`,
+                        { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
+                    );
+                    await showConfirmation(ctx);
+                    return;
+                }
+                if (text.includes('No') || text.includes('不使用')) {
+                    ctx.session.peerFlow = { ...flow, step: 'confirm', psk: undefined };
+                    await ctx.reply(`✅ PSK: Disabled`, { reply_markup: { remove_keyboard: true } });
+                    await showConfirmation(ctx);
+                    return;
+                }
+                await ctx.reply('Please select a PSK option.\n请选择 PSK 选项。');
+                return;
+            }
+
             // ===== Modify menu handlers (dn42-bot style) =====
             case 'modify_menu': {
                 const uuid = flow.routerUuid;
@@ -1032,7 +1160,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 let port: number | undefined;
 
                 // Parse port from endpoint
-                if (text.toLowerCase() === 'none') {
+                if (text.toLowerCase() === 'none' || text.includes('NAT')) {
                     endpoint = '';
                 } else if (text.includes(':') && !text.includes('::')) {
                     // IPv4:port or domain:port
