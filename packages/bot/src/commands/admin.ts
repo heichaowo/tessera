@@ -301,7 +301,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            const routers = result.data.routers.filter((r: RouterInfo) => r.isOpen);
+            const routers = result.data.routers;
 
             if (routers.length === 0) {
                 await ctx.reply('❌ No available nodes.');
@@ -309,43 +309,106 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            // Build keyboard
-            const keyboard = new InlineKeyboard();
-            const nodeMap: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number }> = {};
+            // Build node list message with detailed info (dn42-bot style)
+            let msgText = '';
+            const nodeMap: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number; name: string }> = {};
+            const couldPeer: string[] = [];
 
-            routers.forEach((r, i) => {
-                const label = r.name;
-                keyboard.text(label, `peer:node:${label}`);
-                if ((i + 1) % 2 === 0) keyboard.row();
-                nodeMap[label] = {
-                    uuid: r.uuid,
-                    endpoint: r.endpoint || r.name,
-                    pubkey: r.wgPublicKey || 'N/A',
-                    nodeId: r.nodeId || 0,
-                    regionCode: r.regionCode || 0,
-                };
-            });
+            for (const r of routers) {
+                // Build label: COUNTRY | City | Provider (or name if missing)
+                const countryCode = r.region?.toUpperCase() || 'UNK';
+                const city = r.location || r.name;
+                const provider = r.provider || '';
+                const label = provider ? `${countryCode} | ${city} | ${provider}` : `${countryCode} | ${city}`;
 
+                // Status section
+                let statusLines = `- ${label}\n`;
+
+                if (r.isOpen) {
+                    statusLines += `  ✅ Open For Peer\n`;
+                } else {
+                    statusLines += `  ❌ Closed\n`;
+                }
+
+                // Capacity
+                const current = r.sessionCount || 0;
+                const max = r.maxPeers || 0;
+                if (max > 0) {
+                    statusLines += `  ✅ Capacity: ${current} / ${max}\n`;
+                } else {
+                    statusLines += `  ✅ Capacity: ${current} / Unlimited\n`;
+                }
+
+                // Minimum peers (always show as no minimum)
+                statusLines += `  ✅ No minimum number of peers requirement\n`;
+
+                // IPv4/IPv6 support
+                if (r.supportsIpv4 !== false) {
+                    statusLines += `  ✅ IPv4: Yes\n`;
+                } else {
+                    statusLines += `  ⚠️ IPv4: No\n`;
+                }
+
+                if (r.supportsIpv6 !== false) {
+                    statusLines += `  ✅ IPv6: Yes\n`;
+                } else {
+                    statusLines += `  ⚠️ IPv6: No\n`;
+                }
+
+                // CN peer restriction
+                if (r.allowCnPeers === false) {
+                    statusLines += `  ⚠️ Not allowed to peer with Chinese Mainland\n`;
+                }
+
+                msgText += statusLines + '\n';
+
+                // Add to selectable list if open and has capacity
+                const hasCapacity = max === 0 || current < max;
+                if (r.isOpen && hasCapacity) {
+                    couldPeer.push(label);
+                    nodeMap[label] = {
+                        uuid: r.uuid,
+                        endpoint: r.endpoint || `${r.name}.dn42.moenet.work`,
+                        pubkey: r.wgPublicKey || 'N/A',
+                        nodeId: r.nodeId || 0,
+                        regionCode: r.regionCode || 0,
+                        name: r.name,
+                    };
+                }
+            }
+
+            if (couldPeer.length === 0) {
+                await ctx.reply(
+                    `${msgText}\n❌ 当前没有可 Peer 的节点 / No available nodes for peering`,
+                    { reply_markup: { remove_keyboard: true } }
+                );
+                ctx.session.peerFlow = undefined;
+                return;
+            }
+
+            // Save nodeMap to session
             ctx.session.peerFlow = {
                 ...ctx.session.peerFlow!,
                 step: 'select_node',
                 nodeMap,
             };
 
-            // Calculate port for this ASN
-            let userPort: number;
-            if (asn >= 4242420000 && asn <= 4242429999) {
-                userPort = 30000 + (asn % 10000);
-            } else if (asn >= 4201270000 && asn <= 4201279999) {
-                userPort = 40000 + (asn % 10000);
-            } else {
-                userPort = 50000 + (asn % 10000);
-            }
+            // Send node list
+            await ctx.reply(msgText);
 
+            // Build ReplyKeyboard with one row per option
+            const keyboard: { text: string }[][] = couldPeer.map(label => [{ text: label }]);
+
+            // Send selection prompt with ReplyKeyboard
             await ctx.reply(
-                `📡 *Select Node for AS${asn}*\n选择节点\n\n` +
-                `Port will be: \`${userPort}\``,
-                { parse_mode: 'Markdown', reply_markup: keyboard }
+                'Which node do you want to choose?\n你想选择哪个节点?',
+                {
+                    reply_markup: {
+                        keyboard,
+                        resize_keyboard: true,
+                        one_time_keyboard: true,
+                    }
+                }
             );
         } catch (error) {
             console.error('[AddPeer Wizard] Error:', error);
@@ -353,6 +416,56 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             ctx.session.peerFlow = undefined;
         }
     }
+
+    /**
+     * Handle ReplyKeyboard node selection for admin addpeer wizard
+     */
+    bot.on('message:text', async (ctx, next) => {
+        const flow = ctx.session.peerFlow;
+        if (!flow || flow.step !== 'select_node' || !flow.isAdminMode) {
+            return next();
+        }
+
+        const text = ctx.message.text.trim();
+        const nodeInfo = flow.nodeMap?.[text];
+
+        if (!nodeInfo) {
+            // Not a valid node selection, pass to next handler
+            return next();
+        }
+
+        // Get ASN from flow
+        const asn = flow.targetAsn || 0;
+
+        // Calculate port based on ASN
+        let userPort: number;
+        if (asn >= 4242420000 && asn <= 4242429999) {
+            userPort = 30000 + (asn % 10000);
+        } else if (asn >= 4201270000 && asn <= 4201279999) {
+            userPort = 40000 + (asn % 10000);
+        } else {
+            userPort = 50000 + (asn % 10000);
+        }
+
+        // Update session with selected node
+        ctx.session.peerFlow = {
+            ...flow,
+            step: 'await_continue',
+            routerName: nodeInfo.name || text.split(' | ')[1] || text,
+            routerUuid: nodeInfo.uuid,
+            serverEndpoint: nodeInfo.endpoint,
+            serverPort: userPort,
+            serverPubkey: nodeInfo.pubkey,
+            serverLla: `fe80::998:${nodeInfo.regionCode}:${nodeInfo.nodeId}:1`,
+        };
+
+        // Confirm selection - use routerName from session
+        await ctx.reply(`✅ Selected: ${ctx.session.peerFlow.routerName}`, { reply_markup: { remove_keyboard: true } });
+
+        // Import and call showServerWgInfo (reads info from ctx.session.peerFlow)
+        const { showServerWgInfo } = await import('./peer/ui');
+        await showServerWgInfo(ctx);
+    });
 }
 
 /**
@@ -450,6 +563,7 @@ interface RouterInfo {
     uuid: string;
     name: string;
     location: string;
+    region?: string;
     sessionCount: number;
     isOpen: boolean;
     endpoint?: string;

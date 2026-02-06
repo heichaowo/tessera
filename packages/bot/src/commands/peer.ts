@@ -356,8 +356,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 // Handle session type selection from ReplyKeyboard
                 if (text.includes('MP-BGP') || text.includes('ENH')) {
                     ctx.session.peerFlow = { ...flow, step: 'input_ipv6', sessionType: 'ipv6_only' };
-                    // Suggest fe80::998 for consistent LLA peering
-                    const suggested = `fe80::998`;
+                    const asn = ctx.session.asn || 0;
+                    const suggested = `fe80::${asn % 10000}`;
                     await ctx.reply(`✅ Session Type: *MP-BGP + ENH*`, { parse_mode: 'Markdown' });
                     await promptIpv6(ctx, suggested);
                     return;

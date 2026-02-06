@@ -33,7 +33,7 @@ interface SessionData {
         publicKey?: string;
         mtu?: number;
         psk?: string | null;
-        nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number }>;
+        nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number; name?: string }>;
         // For modify flow - diff tracking (dn42-bot style)
         asn?: number;
         backup?: {
