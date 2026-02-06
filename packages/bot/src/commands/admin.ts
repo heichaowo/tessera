@@ -315,49 +315,41 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             const couldPeer: string[] = [];
 
             for (const r of routers) {
-                // Build label: COUNTRY | City | Provider (or name if missing)
-                const countryCode = r.region?.toUpperCase() || 'UNK';
-                const city = r.location || r.name;
+                // Build label: NAME | City | Provider
+                const nodeName = r.name.toUpperCase();
+                const city = r.location || '';
                 const provider = r.provider || '';
-                const label = provider ? `${countryCode} | ${city} | ${provider}` : `${countryCode} | ${city}`;
+                const label = provider ? `${nodeName} | ${city} | ${provider}` : `${nodeName} | ${city}`;
 
-                // Status section
+                // Status section - use different icons
                 let statusLines = `- ${label}\n`;
 
                 if (r.isOpen) {
-                    statusLines += `  ✅ Open For Peer\n`;
+                    statusLines += `  🟢 Open For Peer\n`;
                 } else {
-                    statusLines += `  ❌ Closed\n`;
+                    statusLines += `  🔴 Closed\n`;
                 }
 
                 // Capacity
                 const current = r.sessionCount || 0;
                 const max = r.maxPeers || 0;
                 if (max > 0) {
-                    statusLines += `  ✅ Capacity: ${current} / ${max}\n`;
+                    statusLines += `  👥 Capacity: ${current} / ${max}\n`;
                 } else {
-                    statusLines += `  ✅ Capacity: ${current} / Unlimited\n`;
+                    statusLines += `  👥 Capacity: ${current} / Unlimited\n`;
                 }
 
-                // Minimum peers (always show as no minimum)
-                statusLines += `  ✅ No minimum number of peers requirement\n`;
-
-                // IPv4/IPv6 support
-                if (r.supportsIpv4 !== false) {
-                    statusLines += `  ✅ IPv4: Yes\n`;
-                } else {
+                // IPv4/IPv6 support - only show if not supported
+                if (r.supportsIpv4 === false) {
                     statusLines += `  ⚠️ IPv4: No\n`;
                 }
-
-                if (r.supportsIpv6 !== false) {
-                    statusLines += `  ✅ IPv6: Yes\n`;
-                } else {
+                if (r.supportsIpv6 === false) {
                     statusLines += `  ⚠️ IPv6: No\n`;
                 }
 
                 // CN peer restriction
                 if (r.allowCnPeers === false) {
-                    statusLines += `  ⚠️ Not allowed to peer with Chinese Mainland\n`;
+                    statusLines += `  🚫 Not allowed to peer with Chinese Mainland\n`;
                 }
 
                 msgText += statusLines + '\n';
