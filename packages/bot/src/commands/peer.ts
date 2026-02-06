@@ -298,6 +298,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         switch (flow.step) {
             // ===== Creation wizard ReplyKeyboard handlers =====
             case 'select_node': {
+                // Skip admin mode - handled by admin.ts
+                if (flow.isAdminMode) {
+                    return next();
+                }
                 // Handle node selection from ReplyKeyboard
                 const nodeMap = flow.nodeMap;
                 if (!nodeMap) {
