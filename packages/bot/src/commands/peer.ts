@@ -1617,7 +1617,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
      */
     async function showConfirmation(ctx: BotContext) {
         const flow = ctx.session.peerFlow;
-        const asn = ctx.session.asn;
+        // Use targetAsn for admin mode, session.asn for user mode
+        const asn = flow?.isAdminMode ? flow.targetAsn : ctx.session.asn;
         if (!flow || !asn) return;
 
         const endpointDisplay = flow.endpoint && flow.port

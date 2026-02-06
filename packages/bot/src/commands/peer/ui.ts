@@ -181,7 +181,8 @@ export async function promptPsk(ctx: BotContext): Promise<void> {
  */
 export async function showConfirmation(ctx: BotContext): Promise<void> {
     const flow = ctx.session.peerFlow;
-    const asn = ctx.session.asn;
+    // Use targetAsn for admin mode, session.asn for user mode
+    const asn = flow?.isAdminMode ? flow.targetAsn : ctx.session.asn;
     if (!flow || !asn) return;
 
     const endpointDisplay = flow.endpoint && flow.port
