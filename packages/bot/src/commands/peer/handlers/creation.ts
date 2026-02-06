@@ -36,7 +36,8 @@ export function registerCreationHandlers(bot: Bot<BotContext>) {
             return;
         }
 
-        const asn = ctx.session.asn || 0;
+        // Get ASN from peerFlow.targetAsn (/addpeer) or ctx.session.asn (/peer)
+        const asn = flow.targetAsn || ctx.session.asn || 0;
         // Calculate port based on ASN
         let userPort: number;
         if (asn >= 4242420000 && asn <= 4242429999) {
