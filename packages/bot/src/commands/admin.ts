@@ -429,7 +429,6 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         // Get ASN from flow and calculate port
         const asn = flow.targetAsn || 0;
-        console.log('[AddPeer] DEBUG: flow.targetAsn =', flow.targetAsn, ', asn =', asn, ', isAdminMode =', flow.isAdminMode);
         const userPort = calculatePort(asn);
 
         // Update session with selected node
