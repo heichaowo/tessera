@@ -87,32 +87,53 @@ export async function preRegion(ctx: BotContext, peerInfo: PeerInfo): Promise<St
         }
 
         const routers = result.data.routers;
-        let msgText = '📡 *Node List 节点列表*\n\n';
+        let msgText = '';
         peerInfo.nodeMap = {};
         const couldPeer: string[] = [];
 
         for (const n of routers) {
-            const label = `${n.name} (${n.region || n.location || 'Unknown'})`;
-            let status = '';
+            // Build label: NAME | City | Provider
+            const nodeName = n.name?.toUpperCase() || 'UNKNOWN';
+            const city = n.location || '';
+            const provider = n.provider || '';
+            const label = provider ? `${nodeName} | ${city} | ${provider}` : `${nodeName} | ${city}`;
+
+            // Status section - use different icons
+            let statusLines = `- ${label}\n`;
 
             if (n.isOpen) {
-                status += '✔️ Open ';
+                statusLines += `  🟢 Open For Peer\n`;
             } else {
-                status += '❌ Closed ';
+                statusLines += `  🔴 Closed\n`;
             }
 
-            if (n.maxPeers && n.maxPeers > 0) {
-                const current = n.currentPeers || 0;
-                if (current < n.maxPeers) {
-                    status += `📊 ${current}/${n.maxPeers} `;
-                } else {
-                    status += `❌ Full ${current}/${n.maxPeers} `;
-                }
+            // Capacity
+            const current = n.sessionCount || n.currentPeers || 0;
+            const max = n.maxPeers || 0;
+            if (max > 0) {
+                statusLines += `  � Capacity: ${current} / ${max}\n`;
+            } else {
+                statusLines += `  👥 Capacity: ${current} / Unlimited\n`;
             }
 
-            msgText += `• \`${label}\` ${status}\n`;
+            // IPv4/IPv6 support - only show if not supported
+            if (n.supportsIpv4 === false) {
+                statusLines += `  ⚠️ IPv4: No\n`;
+            }
+            if (n.supportsIpv6 === false) {
+                statusLines += `  ⚠️ IPv6: No\n`;
+            }
 
-            if (n.isOpen) {
+            // CN peer restriction
+            if (n.allowCnPeers === false) {
+                statusLines += `  🚫 Not allowed to peer with Chinese Mainland\n`;
+            }
+
+            msgText += statusLines + '\n';
+
+            // Add to selectable list if open and has capacity
+            const hasCapacity = max === 0 || current < max;
+            if (n.isOpen && hasCapacity) {
                 couldPeer.push(label);
                 peerInfo.nodeMap[label] = n.name;
             }
@@ -120,7 +141,7 @@ export async function preRegion(ctx: BotContext, peerInfo: PeerInfo): Promise<St
 
         if (couldPeer.length === 0) {
             await ctx.reply(
-                `${msgText}\n❌ 当前没有可 Peer 的节点`,
+                `${msgText}\n❌ 当前没有可 Peer 的节点 / No available nodes for peering`,
                 { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
             );
             return null;
@@ -136,13 +157,15 @@ export async function preRegion(ctx: BotContext, peerInfo: PeerInfo): Promise<St
             return await postRegion(ctx, peerInfo, couldPeer[0] ?? '');
         }
 
+        // Send node list
+        await ctx.reply(msgText);
+
         // Build ReplyKeyboard for selection
         const keyboard: { text: string }[][] = couldPeer.map(label => [{ text: label }]);
 
         await ctx.reply(
-            `${msgText}\n选择节点 / Select node:`,
+            'Which node do you want to choose?\n你想选择哪个节点?',
             {
-                parse_mode: 'Markdown',
                 reply_markup: {
                     keyboard,
                     resize_keyboard: true,

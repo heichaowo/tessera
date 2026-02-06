@@ -2,6 +2,7 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
+import { calculatePort } from './peer/validators';
 
 /**
  * API client for moenet-core
@@ -426,19 +427,9 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             return next();
         }
 
-        // Get ASN from flow
+        // Get ASN from flow and calculate port
         const asn = flow.targetAsn || 0;
-        console.log('[AddPeer] flow.targetAsn:', flow.targetAsn, 'asn:', asn, 'flow:', JSON.stringify(flow, null, 2));
-
-        // Calculate port based on ASN
-        let userPort: number;
-        if (asn >= 4242420000 && asn <= 4242429999) {
-            userPort = 30000 + (asn % 10000);
-        } else if (asn >= 4201270000 && asn <= 4201279999) {
-            userPort = 40000 + (asn % 10000);
-        } else {
-            userPort = 50000 + (asn % 10000);
-        }
+        const userPort = calculatePort(asn);
 
         // Update session with selected node
         ctx.session.peerFlow = {

@@ -157,6 +157,11 @@ export interface RouterData {
     regionCode?: number;
     maxPeers?: number;
     currentPeers?: number;
+    sessionCount?: number;
+    provider?: string;
+    supportsIpv4?: boolean;
+    supportsIpv6?: boolean;
+    allowCnPeers?: boolean;
 }
 
 /**
