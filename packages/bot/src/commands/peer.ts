@@ -1044,8 +1044,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
-                // Validate IP ownership
-                const asn = ctx.session.asn || 0;
+                // Validate IP ownership (use targetAsn for admin mode)
+                const asn = flow.isAdminMode ? (flow.targetAsn || 0) : (ctx.session.asn || 0);
                 const validation = await validateIpOwnership(asn, ipv6 || '');
                 if (!validation.valid && validation.warning) {
                     await ctx.reply(validation.warning);
@@ -1079,8 +1079,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
-                // Validate IP ownership
-                const asn = ctx.session.asn || 0;
+                // Validate IP ownership (use targetAsn for admin mode)
+                const asn = flow.isAdminMode ? (flow.targetAsn || 0) : (ctx.session.asn || 0);
                 const validation = await validateIpOwnership(asn, localIpv6 || '');
                 if (!validation.valid && validation.warning) {
                     await ctx.reply(validation.warning);
@@ -1111,8 +1111,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
-                // Validate IP ownership
-                const asn = ctx.session.asn || 0;
+                // Validate IP ownership (use targetAsn for admin mode)
+                const asn = flow.isAdminMode ? (flow.targetAsn || 0) : (ctx.session.asn || 0);
                 const validation = await validateIpOwnership(asn, ipv4);
                 if (!validation.valid && validation.warning) {
                     await ctx.reply(validation.warning);
@@ -1139,8 +1139,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
-                // Validate IP ownership
-                const asn = ctx.session.asn || 0;
+                // Validate IP ownership (use targetAsn for admin mode)
+                const asn = flow.isAdminMode ? (flow.targetAsn || 0) : (ctx.session.asn || 0);
                 const validation = await validateIpOwnership(asn, localIpv4);
                 if (!validation.valid && validation.warning) {
                     await ctx.reply(validation.warning);
