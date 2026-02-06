@@ -428,6 +428,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         // Get ASN from flow
         const asn = flow.targetAsn || 0;
+        console.log('[AddPeer] flow.targetAsn:', flow.targetAsn, 'asn:', asn, 'flow:', JSON.stringify(flow, null, 2));
 
         // Calculate port based on ASN
         let userPort: number;
