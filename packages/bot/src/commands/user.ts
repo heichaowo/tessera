@@ -245,6 +245,10 @@ async function verifyGpgSignatureFull(
 
 /**
  * Full SSH signature verification
+ * Follows the same approach as the old Python project:
+ * - Uses spawn with argument array (no shell)
+ * - Pipes challenge via stdin
+ * - Normalizes SSH signature armor to handle Telegram line wrapping
  */
 async function verifySshSignatureFull(
     signature: string,
@@ -259,50 +263,64 @@ async function verifySshSignatureFull(
 
     try {
         // Normalize SSH signature: Telegram wraps base64 lines at arbitrary
-        // widths which corrupts the sshsig armor. Re-format properly:
-        // 1. Extract header/footer
-        // 2. Strip all whitespace from base64 body
-        // 3. Re-wrap at 70 chars per line
-        const lines = signature.trim().replace(/\r\n/g, '\n').split('\n').map(l => l.trim());
-        const headerIdx = lines.findIndex(l => l === '-----BEGIN SSH SIGNATURE-----');
-        const footerIdx = lines.findIndex(l => l === '-----END SSH SIGNATURE-----');
-
-        let normalizedSig: string;
-        if (headerIdx !== -1 && footerIdx !== -1 && footerIdx > headerIdx) {
-            const base64Body = lines.slice(headerIdx + 1, footerIdx).join('').replace(/\s/g, '');
-            const wrappedLines: string[] = [];
-            for (let i = 0; i < base64Body.length; i += 70) {
-                wrappedLines.push(base64Body.slice(i, i + 70));
-            }
-            normalizedSig = [
-                '-----BEGIN SSH SIGNATURE-----',
-                ...wrappedLines,
-                '-----END SSH SIGNATURE-----',
-                '',
-            ].join('\n');
-        } else {
-            normalizedSig = signature.trim() + '\n';
-        }
+        // widths which corrupts the sshsig armor. Re-format properly.
+        const normalizedSig = normalizeSshSignature(signature);
+        console.log(`[SSH Verify] Normalized signature (first 200 chars): ${normalizedSig.slice(0, 200)}`);
+        console.log(`[SSH Verify] Challenge: ${challenge}`);
+        console.log(`[SSH Verify] SSH key: ${sshKey.slice(0, 60)}...`);
 
         await fs.writeFile(sigFile, normalizedSig);
         await fs.writeFile(pubFile, sshKey);
         await fs.writeFile(allowFile, `user ${sshKey}\n`);
 
-        // Escape challenge to prevent shell injection
-        const safeChallenge = challenge.replace(/'/g, "'\\''");
-        const result = await execAsync(
-            `echo -n '${safeChallenge}' | ssh-keygen -Y verify -f "${allowFile}" -I user -n file -s "${sigFile}"`,
-            { timeout: 10000 }
-        );
+        // Use spawn with argument array (no shell) - same as old project's subprocess.run
+        const { spawn } = await import('child_process');
+        const result = await new Promise<{ stdout: string; stderr: string; code: number }>((resolve, reject) => {
+            const proc = spawn('ssh-keygen', [
+                '-Y', 'verify',
+                '-f', allowFile,
+                '-I', 'user',
+                '-n', 'file',
+                '-s', sigFile,
+            ]);
 
-        return { verified: result.stdout.includes('Good signature') || result.stderr.includes('Good signature') };
+            let stdout = '';
+            let stderr = '';
+
+            proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+            proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+            // Pipe challenge via stdin (same as old project's input=challenge)
+            proc.stdin.write(challenge);
+            proc.stdin.end();
+
+            const timer = setTimeout(() => {
+                proc.kill();
+                reject(new Error('ssh-keygen timed out'));
+            }, 10000);
+
+            proc.on('close', (code: number | null) => {
+                clearTimeout(timer);
+                resolve({ stdout, stderr, code: code ?? 1 });
+            });
+
+            proc.on('error', (err: Error) => {
+                clearTimeout(timer);
+                reject(err);
+            });
+        });
+
+        console.log(`[SSH Verify] Exit code: ${result.code}, stdout: ${result.stdout}, stderr: ${result.stderr}`);
+
+        const goodSig = result.stdout.includes('Good signature') || result.stderr.includes('Good signature');
+        return { verified: goodSig };
 
     } catch (error) {
         const e = error as Error & { stdout?: string; stderr?: string };
-        // ssh-keygen outputs "Good signature" even with non-zero exit in some cases
         if (e.stdout?.includes('Good signature') || e.stderr?.includes('Good signature')) {
             return { verified: true };
         }
+        console.error(`[SSH Verify] Error: ${error}`);
         return { verified: false, error: String(error) };
     } finally {
         for (const f of [sigFile, pubFile, allowFile]) {
@@ -310,6 +328,43 @@ async function verifySshSignatureFull(
         }
     }
 }
+
+/**
+ * Normalize SSH signature armor to handle Telegram formatting.
+ * Extracts the base64 body, strips all whitespace, and re-wraps at 70 chars.
+ */
+function normalizeSshSignature(raw: string): string {
+    const trimmed = raw.trim();
+
+    // Try to find header and footer anywhere in the text
+    const headerMatch = trimmed.match(/-----BEGIN SSH SIGNATURE-----/);
+    const footerMatch = trimmed.match(/-----END SSH SIGNATURE-----/);
+
+    if (!headerMatch || !footerMatch) {
+        // Fallback: return as-is with trailing newline
+        return trimmed + '\n';
+    }
+
+    const headerEnd = trimmed.indexOf('-----BEGIN SSH SIGNATURE-----') + '-----BEGIN SSH SIGNATURE-----'.length;
+    const footerStart = trimmed.indexOf('-----END SSH SIGNATURE-----');
+
+    // Extract everything between header and footer, strip ALL whitespace
+    const base64Body = trimmed.slice(headerEnd, footerStart).replace(/\s+/g, '');
+
+    // Re-wrap at 70 chars per line
+    const wrappedLines: string[] = [];
+    for (let i = 0; i < base64Body.length; i += 70) {
+        wrappedLines.push(base64Body.slice(i, i + 70));
+    }
+
+    return [
+        '-----BEGIN SSH SIGNATURE-----',
+        ...wrappedLines,
+        '-----END SSH SIGNATURE-----',
+        '',
+    ].join('\n');
+}
+
 
 // =============================================================================
 // Command Registration
