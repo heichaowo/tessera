@@ -258,7 +258,9 @@ async function verifySshSignatureFull(
     const allowFile = path.join(tmpDir, `ssh_allow_${uniqueId}.txt`);
 
     try {
-        await fs.writeFile(sigFile, signature);
+        // Normalize signature: trim, fix line endings, ensure trailing newline
+        const normalizedSig = signature.trim().replace(/\r\n/g, '\n') + '\n';
+        await fs.writeFile(sigFile, normalizedSig);
         await fs.writeFile(pubFile, sshKey);
         await fs.writeFile(allowFile, `user ${sshKey}\n`);
 
