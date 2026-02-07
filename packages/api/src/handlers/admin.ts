@@ -800,6 +800,7 @@ async function migrateSession(c: Context, body: {
             ipv4: sessionData.ipv4 || null,
             ipv6: sessionData.ipv6 || null,
             ipv6LinkLocal: sessionData.ipv6LinkLocal || null,
+            localIpv4: sessionData.localIpv4 || null,
             type: sessionData.type || 'wireguard',
             extensions: sessionData.extensions || null,
             interface: interfaceName,
@@ -823,8 +824,11 @@ async function migrateSession(c: Context, body: {
         });
     } catch (error) {
         await t.rollback();
-        console.error('[Admin] Error migrating session:', error);
-        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to migrate session');
+        const errMsg = error instanceof Error ? error.message : String(error);
+        const errStack = error instanceof Error ? error.stack : '';
+        console.error(`[Admin] Error migrating session AS${asn} ${uuid}:`, errMsg);
+        if (errStack) console.error('[Admin] Stack:', errStack);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, `Failed to migrate session: ${errMsg}`);
     }
 }
 
