@@ -270,11 +270,24 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
  */
 async function handleModify(c: Context, router: string): Promise<Response> {
     const body = await c.req.json();
-    console.log('[handleModify] router:', router, 'body:', JSON.stringify(body));
-    const { uuid, status, lastError } = body;
+    // Accept both 'uuid' and 'peer_id' — agent sends 'peer_id'
+    const uuid = body.uuid || body.peer_id;
+    const { lastError } = body;
+
+    // Map string status to PeeringStatus enum if needed
+    let status = body.status;
+    if (typeof status === 'string') {
+        const statusMap: Record<string, PeeringStatus> = {
+            'active': PeeringStatus.ENABLED,
+            'enabled': PeeringStatus.ENABLED,
+            'problem': PeeringStatus.PROBLEM,
+            'deleted': PeeringStatus.TEARDOWN,
+        };
+        status = statusMap[status] ?? status;
+    }
 
     if (!uuid || status === undefined) {
-        console.log('[handleModify] REJECTED - uuid:', uuid, 'status:', status, 'typeof status:', typeof status);
+        console.log('[handleModify] REJECTED - uuid:', uuid, 'body:', JSON.stringify(body));
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing uuid or status');
     }
 
