@@ -79,7 +79,7 @@ async function showModifyMenu(ctx: BotContext, isFirstTime = false) {
     const currentInfo =
         `\`\`\`${isFirstTime ? 'CurrentInfo' : 'ModifiedInfo'}\n` +
         `Region:\n` +
-        `    ${flow.routerName || 'Unknown'}\n` +
+        `    ${flow.routerName || 'Unknown'}${flow.pendingMigration ? ` → ${flow.pendingMigration.nodeName}` : ''}\n` +
         `Basic:\n` +
         `    ASN:         ${flow.asn || ''}\n` +
         `    Channel:     ${channel}\n` +
