@@ -88,7 +88,7 @@ async function showModifyMenu(ctx: BotContext, isFirstTime = false) {
         `    Local IPv6:  ${current.localIpv6 || 'Not set'}\n` +
         `    Local IPv4:  ${current.localIpv4 || 'Not set'}\n` +
         `Tunnel:\n` +
-        `    Endpoint:    ${current.endpoint ? `${current.endpoint}:${current.port}` : 'Not set'}\n` +
+        `    Endpoint:    ${current.endpoint ? (current.port ? `${current.endpoint}:${current.port}` : current.endpoint) : 'Not set'}\n` +
         `    PublicKey:   ${current.pubkey ? current.pubkey.slice(0, 20) + '...' : 'Not set'}\n` +
         `    PSK:         ${current.psk ? 'Enabled' : 'Not enabled'}\n` +
         `    MTU:         ${current.mtu || 1420}\n` +
@@ -1785,9 +1785,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
             // Build selection keyboard
             const keyboard = new InlineKeyboard();
-            sessions.forEach((s: { uuid: string; router: string; status: number }) => {
+            sessions.forEach((s: { uuid: string; router: string; routerName?: string; status: number }) => {
                 const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '❌';
-                keyboard.text(`${statusIcon} ${s.router}`, `modify:peer:${s.uuid}`).row();
+                const displayName = s.routerName || s.router;
+                keyboard.text(`${statusIcon} ${displayName}`, `modify:peer:${s.uuid}`).row();
             });
             keyboard.text('🚫 Cancel 取消', 'modify:cancel');
 
@@ -1833,17 +1834,29 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             // Parse credential for backup
             let pubkey = '';
             let hasPsk = false;
+            let credEndpoint = '';
+            let credListenPort = '';
             if (session.credential) {
                 try {
                     const cred = typeof session.credential === 'string'
                         ? JSON.parse(session.credential)
                         : session.credential;
                     pubkey = cred.pubkey || cred.public_key || '';
-                    hasPsk = !!cred.psk;
+                    hasPsk = !!(cred.preshared_key || cred.psk);
+                    // Extract endpoint from credential if DB endpoint doesn't have port
+                    if (cred.endpoint) {
+                        credEndpoint = cred.endpoint;
+                    }
+                    if (cred.listen_port) {
+                        credListenPort = String(cred.listen_port);
+                    }
                 } catch {
                     pubkey = String(session.credential).slice(0, 44);
                 }
             }
+
+            // Resolve endpoint: prefer DB endpoint, fall back to credential endpoint
+            const resolvedEndpoint = session.endpoint || credEndpoint || '';
 
             // Parse extensions
             const extensions = session.extensions || '';
@@ -1857,8 +1870,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 routerName: session.routerName || session.router,
                 asn: session.asn,
                 backup: {
-                    endpoint: session.endpoint || '',
-                    port: session.port || '',
+                    endpoint: resolvedEndpoint,
+                    port: credListenPort,
                     ipv6: session.ipv6 || '',
                     ipv4: session.ipv4 || '',
                     localIpv6: session.ipv6LinkLocal || '',
@@ -1872,8 +1885,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 },
                 // Current values (will be modified by user)
                 current: {
-                    endpoint: session.endpoint || '',
-                    port: session.port || '',
+                    endpoint: resolvedEndpoint,
+                    port: credListenPort,
                     ipv6: session.ipv6 || '',
                     ipv4: session.ipv4 || '',
                     localIpv6: session.ipv6LinkLocal || '',
@@ -1890,9 +1903,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             // Build current info display
             const channel = hasMpbgp ? 'IPv6 & IPv4' : 'IPv6 only';
             const mpbgpText = hasMpbgp ? (hasEnh ? 'IPv6 (ENH)' : 'IPv6') : 'Not supported';
-            const endpoint = session.endpoint
-                ? (session.port ? `${session.endpoint}:${session.port}` : session.endpoint)
-                : 'Not set';
+            const endpointDisplay = resolvedEndpoint || 'Not set';
 
             const currentInfo =
                 `\`\`\`CurrentInfo\n` +
@@ -1907,7 +1918,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 `    Local IPv6:  ${session.ipv6LinkLocal || 'Not set'}\n` +
                 `    Local IPv4:  ${session.localIpv4 || 'Not set'}\n` +
                 `Tunnel:\n` +
-                `    Endpoint:    ${endpoint}\n` +
+                `    Endpoint:    ${endpointDisplay}\n` +
                 `    PublicKey:   ${pubkey ? pubkey.slice(0, 20) + '...' : 'Not set'}\n` +
                 `    PSK:         ${hasPsk ? 'Enabled' : 'Not enabled'}\n` +
                 `    MTU:         ${session.mtu || 1420}\n` +

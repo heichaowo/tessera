@@ -340,8 +340,18 @@ async function enumSessions(c: Context, body: { status?: number; asn?: number })
         order: [['created_at', 'DESC']],
     });
 
+    // Resolve router names
+    const routerUuids = [...new Set(sessions.map(s => s.get('router') as string))];
+    const routers = await models.routers.findAll({
+        where: { uuid: routerUuids },
+    });
+    const routerMap = new Map(routers.map(r => [r.get('uuid') as string, r.get('name') as string]));
+
     return success(c, {
-        sessions: sessions.map(s => s.get()),
+        sessions: sessions.map(s => ({
+            ...s.get(),
+            routerName: routerMap.get(s.get('router') as string) || s.get('router'),
+        })),
     });
 }
 
