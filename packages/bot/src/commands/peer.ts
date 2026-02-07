@@ -2072,7 +2072,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     `Select new node:\n选择新节点:`;
                 // Build node keyboard dynamically
                 try {
-                    const nodeResult = await apiRequest('/node', 'POST', { action: 'list' }, config.apiToken);
+                    const nodeResult = await apiRequest('/admin', 'POST', { action: 'enumRouters' }, config.apiToken);
                     const nodes = nodeResult.data?.nodes;
                     if (nodeResult.code === 0 && Array.isArray(nodes)) {
                         keyboard = new InlineKeyboard();
@@ -2295,9 +2295,9 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         // Fetch user's active sessions
         try {
             const result = await apiRequest('/admin', 'POST', {
-                action: 'list',
+                action: 'enumSessions',
                 asn: targetAsn,
-            });
+            }, config.apiToken);
 
             if (result.code !== 0) {
                 await ctx.reply(`❌ Error: ${result.message}`);
@@ -2400,9 +2400,9 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         try {
             // Get user's sessions
             const result = await apiRequest('/admin', 'POST', {
-                action: 'list',
+                action: 'enumSessions',
                 asn,
-            });
+            }, config.apiToken);
 
             if (result.code !== 0) {
                 await ctx.reply(`❌ Error: ${result.message}`);

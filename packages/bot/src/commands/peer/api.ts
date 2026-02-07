@@ -100,9 +100,3 @@ export async function deleteSession(uuid: string): Promise<APIResponse> {
     return apiRequest('/admin', 'POST', { action: 'deleteSession', uuid }, config.apiToken);
 }
 
-/**
- * Restart session
- */
-export async function restartSession(uuid: string): Promise<APIResponse> {
-    return apiRequest('/admin', 'POST', { action: 'restartSession', uuid }, config.apiToken);
-}

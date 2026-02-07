@@ -257,8 +257,8 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         );
 
         try {
-            const result = await apiRequest('/session', 'POST', {
-                action: 'adminCreate',
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'createSession',
                 asn,
                 router: node,
                 endpoint,

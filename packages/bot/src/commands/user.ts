@@ -575,25 +575,17 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             method: 'email',
         });
 
-        // Send email via API
-        try {
-            const result = await apiRequest('/auth', 'POST', {
-                action: 'sendEmail',
-                asn: String(asn),
-                code,
-            });
-
-            if (result.code !== 0) {
-                await ctx.answerCallbackQuery(`${ICONS.error} ${result.message}`);
-                return;
-            }
-
-            await ctx.answerCallbackQuery();
-            await ctx.editMessageText(LOGIN_EMAIL_SENT, { parse_mode: 'Markdown' });
-        } catch (error) {
-            console.error('[Email] Error:', error);
-            await ctx.answerCallbackQuery(`${ICONS.error} Failed to send email`);
-        }
+        // Email login not yet implemented (no email service configured)
+        await ctx.answerCallbackQuery();
+        await ctx.editMessageText(
+            `📧 *Email Login*\n\n` +
+            `⚠️ Email verification is not yet available.\n` +
+            `邮箱验证暂不可用。\n\n` +
+            `Please use GPG or SSH authentication instead.\n` +
+            `请使用 GPG 或 SSH 认证。`,
+            { parse_mode: 'Markdown' }
+        );
+        challengeStore.delete(userId);
     });
 
     // Handle signature/code verification

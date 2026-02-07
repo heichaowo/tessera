@@ -59,6 +59,11 @@ async function isAdmin(c: Context): Promise<boolean> {
  * - approveSession: Approve pending session
  * - rejectSession: Reject pending session
  * - deleteSession: Force delete session
+ * - getStats: Get network statistics
+ * - migrate: Migrate session to a different router
+ * - blockAsn: Block an ASN from peering
+ * - unblockAsn: Unblock an ASN
+ * - enumBlocklist: List all blocked ASNs
  */
 export default async function adminHandler(c: Context): Promise<Response> {
     if (!(await isAdmin(c))) {
@@ -97,6 +102,16 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await setMaintenance(c, body);
         case 'createSession':
             return await createSessionAdmin(c, body);
+        case 'getStats':
+            return await getStats(c);
+        case 'migrate':
+            return await migrateSession(c, body);
+        case 'blockAsn':
+            return await blockAsn(c, body);
+        case 'unblockAsn':
+            return await unblockAsn(c, body);
+        case 'enumBlocklist':
+            return await enumBlocklist(c);
         default:
             return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
     }
@@ -680,5 +695,238 @@ async function createSessionAdmin(c: Context, body: {
     } catch (error) {
         console.error('[Admin] Error creating session:', error);
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to create session');
+    }
+}
+
+/**
+ * Get network statistics (aggregate counts)
+ */
+async function getStats(c: Context): Promise<Response> {
+    const models = getModels();
+
+    try {
+        const totalPeers = await models.bgpSessions.count();
+        const activePeers = await models.bgpSessions.count({
+            where: { status: PeeringStatus.ENABLED },
+        });
+        const pendingPeers = await models.bgpSessions.count({
+            where: { status: PeeringStatus.PENDING_REVIEW },
+        });
+        const totalNodes = await models.routers.count();
+        // Active nodes = count all routers (no status field on router model)
+        const activeNodes = totalNodes;
+
+        return success(c, {
+            stats: {
+                totalPeers,
+                activePeers,
+                pendingPeers,
+                totalNodes,
+                activeNodes,
+            },
+        });
+    } catch (error) {
+        console.error('[Admin] Error getting stats:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to get stats');
+    }
+}
+
+/**
+ * Migrate a session to a different router.
+ * Deletes the old session and creates a new one on the target router,
+ * preserving the peer's configuration.
+ */
+async function migrateSession(c: Context, body: {
+    uuid?: string;
+    newRouter?: string;
+}): Promise<Response> {
+    const { uuid, newRouter } = body;
+
+    if (!uuid || !newRouter) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing uuid or newRouter');
+    }
+
+    const models = getModels();
+
+    // Find existing session
+    const session = await models.bgpSessions.findOne({ where: { uuid } });
+    if (!session) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
+    }
+
+    // Check target router exists
+    const targetRouter = await models.routers.findOne({ where: { uuid: newRouter } });
+    if (!targetRouter) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Target router not found');
+    }
+
+    const sessionData = session.get();
+    const asn = sessionData.asn as number;
+    const oldRouter = sessionData.router as string;
+
+    if (oldRouter === newRouter) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'New router is the same as current router');
+    }
+
+    // Check if session already exists on target router
+    const existing = await models.bgpSessions.findOne({
+        where: { router: newRouter, asn },
+    });
+    if (existing) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Session already exists on target router');
+    }
+
+    try {
+        // Queue old session for deletion
+        await models.bgpSessions.update(
+            { status: PeeringStatus.QUEUED_FOR_DELETE },
+            { where: { uuid } }
+        );
+
+        // Create new session on target router
+        const newUuid = generateUUID();
+        const interfaceName = getInterfaceName(asn);
+        const listenPort = getListenPort(asn);
+
+        await models.bgpSessions.create({
+            uuid: newUuid,
+            router: newRouter,
+            asn,
+            status: PeeringStatus.QUEUED_FOR_SETUP,
+            mtu: sessionData.mtu || 1420,
+            policy: sessionData.policy || SessionPolicy.FULL,
+            ipv4: sessionData.ipv4 || null,
+            ipv6: sessionData.ipv6 || null,
+            ipv6LinkLocal: sessionData.ipv6LinkLocal || null,
+            type: sessionData.type || 'wireguard',
+            extensions: sessionData.extensions || null,
+            interface: interfaceName,
+            endpoint: sessionData.endpoint || null,
+            credential: sessionData.credential || null,
+            data: null,
+            lastError: null,
+            contact: sessionData.contact || null,
+        });
+
+        console.log(`[Admin] Migrated session AS${asn}: ${oldRouter} -> ${newRouter} (old: ${uuid}, new: ${newUuid})`);
+
+        return success(c, {
+            message: 'Session migration initiated',
+            oldUuid: uuid,
+            newUuid,
+            oldRouter,
+            newRouter,
+        });
+    } catch (error) {
+        console.error('[Admin] Error migrating session:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to migrate session');
+    }
+}
+
+// =============================================================================
+// ASN Blocklist (stored in settings KV as JSON array)
+// =============================================================================
+
+const BLOCKLIST_KEY = 'asn_blocklist';
+
+interface BlockedEntry {
+    asn: number;
+    reason?: string;
+    blockedAt: string;
+}
+
+/**
+ * Get the current blocklist from settings
+ */
+async function getBlocklistData(): Promise<BlockedEntry[]> {
+    const models = getModels();
+    const setting = await models.settings.findOne({ where: { key: BLOCKLIST_KEY } });
+    if (!setting) return [];
+    try {
+        return JSON.parse(setting.get('value') as string) as BlockedEntry[];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Save the blocklist to settings
+ */
+async function saveBlocklistData(blocklist: BlockedEntry[]): Promise<void> {
+    const models = getModels();
+    await models.settings.upsert({
+        key: BLOCKLIST_KEY,
+        value: JSON.stringify(blocklist),
+    });
+}
+
+/**
+ * Block an ASN from peering
+ */
+async function blockAsn(c: Context, body: { asn?: number; reason?: string }): Promise<Response> {
+    if (!body.asn) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing asn');
+    }
+
+    try {
+        const blocklist = await getBlocklistData();
+
+        // Check if already blocked
+        if (blocklist.some(b => b.asn === body.asn)) {
+            return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'ASN already blocked');
+        }
+
+        blocklist.push({
+            asn: body.asn,
+            reason: body.reason,
+            blockedAt: new Date().toISOString(),
+        });
+
+        await saveBlocklistData(blocklist);
+        console.log(`[Admin] Blocked ASN ${body.asn}${body.reason ? `: ${body.reason}` : ''}`);
+
+        return success(c, { message: `AS${body.asn} blocked` });
+    } catch (error) {
+        console.error('[Admin] Error blocking ASN:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to block ASN');
+    }
+}
+
+/**
+ * Unblock an ASN
+ */
+async function unblockAsn(c: Context, body: { asn?: number }): Promise<Response> {
+    if (!body.asn) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing asn');
+    }
+
+    try {
+        const blocklist = await getBlocklistData();
+        const filtered = blocklist.filter(b => b.asn !== body.asn);
+
+        if (filtered.length === blocklist.length) {
+            return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'ASN not in blocklist');
+        }
+
+        await saveBlocklistData(filtered);
+        console.log(`[Admin] Unblocked ASN ${body.asn}`);
+
+        return success(c, { message: `AS${body.asn} unblocked` });
+    } catch (error) {
+        console.error('[Admin] Error unblocking ASN:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to unblock ASN');
+    }
+}
+
+/**
+ * List all blocked ASNs
+ */
+async function enumBlocklist(c: Context): Promise<Response> {
+    try {
+        const blocklist = await getBlocklistData();
+        return success(c, { blocklist });
+    } catch (error) {
+        console.error('[Admin] Error listing blocklist:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to list blocklist');
     }
 }

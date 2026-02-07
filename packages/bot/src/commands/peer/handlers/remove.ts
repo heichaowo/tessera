@@ -92,24 +92,37 @@ export function registerRemoveHandlers(bot: Bot<BotContext>) {
         await ctx.editMessageText('⏳ Restarting WireGuard and BGP...\n正在重启 WireGuard 和 BGP...');
 
         try {
-            const result = await apiRequest('/admin', 'POST', {
-                action: 'restart',
-                uuid,
-            }, config.apiToken);
+            const { getAgentEndpoint } = await import('../../../providers/nodes');
+            const endpoint = await getAgentEndpoint(router);
 
-            if (result.code !== 0) {
-                await ctx.reply(`❌ Restart failed: ${result.message}`);
+            if (!endpoint) {
+                await ctx.reply(`❌ Cannot reach agent for ${router}`);
                 return;
             }
 
-            await ctx.reply(
-                `✅ *Restart Complete*\n重启完成\n\n` +
-                `📍 Node: \`${router}\`\n` +
-                `🆔 ASN: \`AS${asn}\`\n\n` +
-                `WireGuard and BGP have been restarted.\n` +
-                `WireGuard 和 BGP 已重启。`,
-                { parse_mode: 'Markdown' }
-            );
+            const peerName = `dn42_${asn}`;
+            const response = await fetch(`${endpoint}/restart`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${config.agentToken || ''}`,
+                },
+                body: JSON.stringify({ peer_name: peerName }),
+            });
+
+            if (response.ok) {
+                await ctx.reply(
+                    `✅ *Restart Complete*\n重启完成\n\n` +
+                    `📍 Node: \`${router}\`\n` +
+                    `🆔 ASN: \`AS${asn}\`\n\n` +
+                    `WireGuard and BGP have been restarted.\n` +
+                    `WireGuard 和 BGP 已重启。`,
+                    { parse_mode: 'Markdown' }
+                );
+            } else {
+                const error = await response.text();
+                await ctx.reply(`❌ Restart failed: ${error}`);
+            }
         } catch (error) {
             console.error('[Restart] Error:', error);
             await ctx.reply('❌ Restart failed.');
