@@ -1786,9 +1786,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             // Build selection keyboard
             const keyboard = new InlineKeyboard();
             sessions.forEach((s: { uuid: string; router: string; routerName?: string; status: number }) => {
-                const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '❌';
                 const displayName = s.routerName || s.router;
-                keyboard.text(`${statusIcon} ${displayName}`, `modify:peer:${s.uuid}`).row();
+                keyboard.text(displayName, `modify:peer:${s.uuid}`).row();
             });
             keyboard.text('🚫 Cancel 取消', 'modify:cancel');
 

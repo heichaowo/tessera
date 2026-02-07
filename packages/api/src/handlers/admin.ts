@@ -585,12 +585,14 @@ async function createSessionAdmin(c: Context, body: {
     router: string;
     ipv6?: string;
     endpoint?: string;
+    port?: number;
     publicKey?: string;
     mtu?: number;
     psk?: string;
     status?: number;
 }): Promise<Response> {
-    const { asn, router, ipv6, endpoint, publicKey, mtu, psk, status } = body;
+    const { asn, router, ipv6, endpoint, port, publicKey, mtu, psk, status } = body;
+    const fullEndpoint = endpoint ? (port ? `${endpoint}:${port}` : endpoint) : null;
 
     if (!asn || !router) {
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing required fields: asn, router');
@@ -635,12 +637,12 @@ async function createSessionAdmin(c: Context, body: {
             type: 'wireguard',
             extensions: null,
             interface: interfaceName,
-            endpoint: endpoint || null,
+            endpoint: fullEndpoint,
             credential: publicKey ? JSON.stringify({
                 public_key: publicKey,
                 preshared_key: psk || null,
                 listen_port: listenPort,
-                endpoint: endpoint || null,
+                endpoint: fullEndpoint,
                 mtu: mtu || 1420,
             }) : null,
             data: null,
