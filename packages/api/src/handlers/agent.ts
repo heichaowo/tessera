@@ -270,9 +270,11 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
  */
 async function handleModify(c: Context, router: string): Promise<Response> {
     const body = await c.req.json();
+    console.log('[handleModify] router:', router, 'body:', JSON.stringify(body));
     const { uuid, status, lastError } = body;
 
     if (!uuid || status === undefined) {
+        console.log('[handleModify] REJECTED - uuid:', uuid, 'status:', status, 'typeof status:', typeof status);
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing uuid or status');
     }
 
