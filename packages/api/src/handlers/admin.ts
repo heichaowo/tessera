@@ -802,10 +802,14 @@ async function migrateSession(c: Context, body: {
             ipv6LinkLocal: sessionData.ipv6LinkLocal || null,
             localIpv4: sessionData.localIpv4 || null,
             type: sessionData.type || 'wireguard',
-            extensions: sessionData.extensions || null,
+            extensions: sessionData.extensions
+                ? (typeof sessionData.extensions === 'string' ? sessionData.extensions : JSON.stringify(sessionData.extensions))
+                : null,
             interface: interfaceName,
             endpoint: sessionData.endpoint || null,
-            credential: sessionData.credential || null,
+            credential: sessionData.credential
+                ? (typeof sessionData.credential === 'string' ? sessionData.credential : JSON.stringify(sessionData.credential))
+                : null,
             data: null,
             lastError: null,
             contact: sessionData.contact || null,
