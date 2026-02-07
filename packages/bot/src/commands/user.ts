@@ -3,8 +3,7 @@ import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
 import crypto from 'crypto';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -23,7 +22,6 @@ import {
     ERROR_NOT_LOGGED_IN,
 } from '../i18n';
 
-const execAsync = promisify(exec);
 
 // =============================================================================
 // Types
@@ -123,24 +121,65 @@ function extractFingerprintFromGpgOutput(stderr: string): string {
 }
 
 /**
- * Decrypt GPG signed message to get original content
+ * Run a command with spawn (no shell) and collect output.
+ *
+ * Used by both GPG and SSH verification to avoid shell injection.
+ */
+function spawnAsync(
+    cmd: string,
+    args: string[],
+    options?: { timeout?: number; stdin?: string }
+): Promise<{ stdout: string; stderr: string; code: number }> {
+    return new Promise((resolve, reject) => {
+        const proc = spawn(cmd, args);
+        let stdout = '';
+        let stderr = '';
+
+        proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+        proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+
+        if (options?.stdin) {
+            proc.stdin.write(options.stdin);
+            proc.stdin.end();
+        }
+
+        const timer = setTimeout(() => {
+            proc.kill('SIGKILL');
+            reject(new Error(`${cmd} timed out`));
+        }, options?.timeout ?? 30000);
+
+        proc.on('close', (code: number | null) => {
+            clearTimeout(timer);
+            resolve({ stdout, stderr, code: code ?? 1 });
+        });
+
+        proc.on('error', (err: Error) => {
+            clearTimeout(timer);
+            reject(err);
+        });
+    });
+}
+
+/**
+ * Decrypt GPG signed message to get original content.
  */
 async function gpgDecryptChallenge(sigPath: string): Promise<{ content: string | null; stderr: string }> {
     try {
-        const { stdout, stderr } = await execAsync(`gpg --decrypt "${sigPath}" 2>&1`);
-        return { content: stdout.trim(), stderr };
+        const result = await spawnAsync('gpg', ['--decrypt', sigPath]);
+        // gpg outputs decrypted content to stdout and status to stderr
+        const combined = result.stdout + result.stderr;
+        return { content: combined.trim(), stderr: result.stderr };
     } catch (error) {
-        const e = error as Error & { stderr?: string };
-        return { content: null, stderr: e.stderr || String(e) };
+        return { content: null, stderr: String(error) };
     }
 }
 
 /**
- * Import GPG key from keyserver
+ * Import GPG key from keyserver.
  */
 async function recvGpgKeyFromKeyserver(fingerprint: string, keyserver: string): Promise<boolean> {
     try {
-        await execAsync(`gpg --keyserver "${keyserver}" --recv-keys "${fingerprint}"`, { timeout: 30000 });
+        await spawnAsync('gpg', ['--keyserver', keyserver, '--recv-keys', fingerprint], { timeout: 30000 });
         return true;
     } catch {
         return false;
@@ -148,15 +187,16 @@ async function recvGpgKeyFromKeyserver(fingerprint: string, keyserver: string): 
 }
 
 /**
- * Verify GPG signature and check if fingerprint matches
+ * Verify GPG signature and check if fingerprint matches.
  */
 async function tryGpgVerifyFingerprint(
     sigPath: string,
     gpgFingerprints: string[]
 ): Promise<{ success: boolean; fingerprint?: string; error?: string }> {
     try {
-        const { stderr } = await execAsync(`gpg --verify "${sigPath}" 2>&1`);
-        const signatureFingerprint = extractFingerprintFromGpgOutput(stderr);
+        const result = await spawnAsync('gpg', ['--verify', sigPath]);
+        // gpg outputs verification info to stderr
+        const signatureFingerprint = extractFingerprintFromGpgOutput(result.stderr);
 
         if (!signatureFingerprint) {
             return { success: false, error: 'Could not extract fingerprint from signature' };
@@ -251,9 +291,13 @@ async function verifyGpgSignatureFull(
  * - Arbitrary line wrapping of base64 body
  * - Zero-width characters
  *
- * Uses spawn with argument array (no shell) and pipes challenge via stdin,
+ * Uses spawnAsync (no shell) and pipes challenge via stdin,
  * matching the old Python project's subprocess.run approach.
  */
+
+const SSH_SIG_HEADER = '-----BEGIN SSH SIGNATURE-----';
+const SSH_SIG_FOOTER = '-----END SSH SIGNATURE-----';
+
 async function verifySshSignatureFull(
     signature: string,
     challenge: string,
@@ -272,47 +316,18 @@ async function verifySshSignatureFull(
         await fs.writeFile(pubFile, sshKey);
         await fs.writeFile(allowFile, `user ${sshKey}\n`);
 
-        // Use spawn with argument array (no shell) - same as old project's subprocess.run
-        const { spawn } = await import('child_process');
-        const result = await new Promise<{ stdout: string; stderr: string; code: number }>((resolve, reject) => {
-            const proc = spawn('ssh-keygen', [
-                '-Y', 'verify',
-                '-f', allowFile,
-                '-I', 'user',
-                '-n', 'file',
-                '-s', sigFile,
-            ]);
+        const result = await spawnAsync('ssh-keygen', [
+            '-Y', 'verify',
+            '-f', allowFile,
+            '-I', 'user',
+            '-n', 'file',
+            '-s', sigFile,
+        ], { timeout: 10000, stdin: challenge });
 
-            let stdout = '';
-            let stderr = '';
-
-            proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
-            proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
-
-            // Pipe challenge via stdin (same as old project's input=challenge)
-            proc.stdin.write(challenge);
-            proc.stdin.end();
-
-            const timer = setTimeout(() => {
-                proc.kill();
-                reject(new Error('ssh-keygen timed out'));
-            }, 10000);
-
-            proc.on('close', (code: number | null) => {
-                clearTimeout(timer);
-                resolve({ stdout, stderr, code: code ?? 1 });
-            });
-
-            proc.on('error', (err: Error) => {
-                clearTimeout(timer);
-                reject(err);
-            });
-        });
-
-        console.log(`[SSH Verify] exit=${result.code} stdout=${result.stdout.trim()} stderr=${result.stderr.trim()}`);
+        console.log(`[SSH Verify] exit=${result.code}`);
 
         // ssh-keygen -Y verify outputs: Good "file" signature for user with ...
-        // Check exit code first (most reliable), then check for "Good" in output
+        // Check exit code first (most reliable), then regex fallback
         const combined = result.stdout + result.stderr;
         const verified = result.code === 0 || /Good\s+"?\w+"?\s+signature/i.test(combined);
 
@@ -324,12 +339,7 @@ async function verifySshSignatureFull(
         return { verified: true };
 
     } catch (error) {
-        const e = error as Error & { stdout?: string; stderr?: string };
-        const combined = (e.stdout || '') + (e.stderr || '');
-        if (/Good\s+"?\w+"?\s+signature/i.test(combined)) {
-            return { verified: true };
-        }
-        console.error(`[SSH Verify] Error: ${error}`);
+        console.error(`[SSH Verify] Error: ${(error as Error).message}`);
         return { verified: false, error: (error as Error).message || String(error) };
     } finally {
         for (const f of [sigFile, pubFile, allowFile]) {
@@ -353,10 +363,10 @@ async function verifySshSignatureFull(
  * - Extracts the base64 body and re-wraps at 70 chars per line
  */
 function normalizeSshSignature(raw: string): string {
-    // Step 1: Replace ALL Unicode dash/hyphen variants → ASCII hyphen
+    // Step 1: Replace ALL Unicode dash/hyphen variants → ASCII hyphen(s)
     // Telegram can substitute any of these depending on platform/version
     let sanitized = raw
-        .replace(/\u2014/g, '--')   // em dash → two hyphens
+        .replace(/\u2014/g, '---')  // em dash → three hyphens (Telegram replaces --- with —)
         .replace(/\u2013/g, '-')    // en dash → hyphen
         .replace(/\u2012/g, '-')    // figure dash
         .replace(/\u2015/g, '-')    // horizontal bar
@@ -374,19 +384,18 @@ function normalizeSshSignature(raw: string): string {
     sanitized = sanitized.trim();
 
     // Step 4: Find header and footer
-    const headerMatch = sanitized.match(/-----BEGIN SSH SIGNATURE-----/);
-    const footerMatch = sanitized.match(/-----END SSH SIGNATURE-----/);
+    const headerIdx = sanitized.indexOf(SSH_SIG_HEADER);
+    const footerIdx = sanitized.indexOf(SSH_SIG_FOOTER);
 
-    if (!headerMatch || !footerMatch) {
+    if (headerIdx === -1 || footerIdx === -1) {
         // Fallback: return as-is with trailing newline
         return sanitized + '\n';
     }
 
-    const headerEnd = sanitized.indexOf('-----BEGIN SSH SIGNATURE-----') + '-----BEGIN SSH SIGNATURE-----'.length;
-    const footerStart = sanitized.indexOf('-----END SSH SIGNATURE-----');
+    const headerEnd = headerIdx + SSH_SIG_HEADER.length;
 
     // Step 5: Extract base64 body, strip ALL whitespace
-    const base64Body = sanitized.slice(headerEnd, footerStart).replace(/\s+/g, '');
+    const base64Body = sanitized.slice(headerEnd, footerIdx).replace(/\s+/g, '');
 
     // Step 6: Re-wrap at 70 chars per line (standard PEM/sshsig format)
     const wrappedLines: string[] = [];
@@ -395,9 +404,9 @@ function normalizeSshSignature(raw: string): string {
     }
 
     return [
-        '-----BEGIN SSH SIGNATURE-----',
+        SSH_SIG_HEADER,
         ...wrappedLines,
-        '-----END SSH SIGNATURE-----',
+        SSH_SIG_FOOTER,
         '',
     ].join('\n');
 }
@@ -855,13 +864,13 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                         { parse_mode: 'Markdown' }
                     );
                 } else {
+                    challengeStore.delete(userId);
                     await ctx.reply(
                         `${ICONS.error} *Signature verification failed*\n签名验证失败\n\n` +
                         `${result.error || 'Unknown error'}\n\n` +
                         `Use /login to try again.\n使用 /login 重试。`,
                         { parse_mode: 'Markdown' }
                     );
-                    challengeStore.delete(userId);
                 }
             }
         } catch (error) {
