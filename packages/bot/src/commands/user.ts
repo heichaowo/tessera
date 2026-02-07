@@ -266,10 +266,14 @@ async function verifySshSignatureFull(
         // widths which corrupts the sshsig armor. Re-format properly.
         const normalizedSig = normalizeSshSignature(signature);
         console.log(`[SSH Verify] Normalized signature (first 200 chars): ${normalizedSig.slice(0, 200)}`);
+        console.log(`[SSH Verify] Signature length: ${normalizedSig.length}`);
+        console.log(`[SSH Verify] Hex dump (first 100 bytes): ${Buffer.from(normalizedSig).slice(0, 100).toString('hex')}`);
         console.log(`[SSH Verify] Challenge: ${challenge}`);
         console.log(`[SSH Verify] SSH key: ${sshKey.slice(0, 60)}...`);
 
         await fs.writeFile(sigFile, normalizedSig);
+        // Debug: save a copy for inspection
+        await fs.writeFile('/tmp/debug_ssh_sig.txt', normalizedSig);
         await fs.writeFile(pubFile, sshKey);
         await fs.writeFile(allowFile, `user ${sshKey}\n`);
 
