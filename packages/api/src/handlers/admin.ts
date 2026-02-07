@@ -621,7 +621,7 @@ async function createSessionAdmin(c: Context, body: {
             policy: SessionPolicy.FULL,
             ipv4: null,
             ipv6: ipv6 || null,
-            ipv6LinkLocal: ipv6 || null,
+            ipv6LinkLocal: null,
             type: 'wireguard',
             extensions: null,
             interface: interfaceName,
