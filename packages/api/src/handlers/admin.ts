@@ -4,7 +4,8 @@ import { makeResponse, ResponseCode, success } from '../common/response';
 import { getModels } from '../db/dbContext';
 import { getRedis } from '../db/redisContext';
 import config from '../config';
-import { PeeringStatus } from '../db/models/bgpSessions';
+import { PeeringStatus, SessionPolicy } from '../db/models/bgpSessions';
+import { generateUUID, getInterfaceName } from '../common/helpers';
 
 interface JWTPayload {
     asn: string;
@@ -94,6 +95,8 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await updateSessionAdmin(c, body);
         case 'setMaintenance':
             return await setMaintenance(c, body);
+        case 'createSession':
+            return await createSessionAdmin(c, body);
         default:
             return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
     }
@@ -560,5 +563,82 @@ async function setMaintenance(c: Context, body: { router?: string; enabled?: boo
     } catch (error) {
         console.error('[Admin] Failed to call agent maintenance API:', error);
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to contact agent');
+    }
+}
+
+/**
+ * Admin create session - creates a peering session directly with ACTIVE status
+ * Bypasses JWT auth and review process.
+ */
+async function createSessionAdmin(c: Context, body: {
+    asn: number;
+    router: string;
+    ipv6?: string;
+    endpoint?: string;
+    publicKey?: string;
+    mtu?: number;
+    psk?: string;
+    status?: number;
+}): Promise<Response> {
+    const { asn, router, ipv6, endpoint, publicKey, mtu, psk, status } = body;
+
+    if (!asn || !router) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing required fields: asn, router');
+    }
+
+    const models = getModels();
+
+    // Check if router exists
+    const routerRecord = await models.routers.findOne({
+        where: { uuid: router },
+    });
+
+    if (!routerRecord) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Router not found');
+    }
+
+    // Check if session already exists
+    const existingSession = await models.bgpSessions.findOne({
+        where: { router, asn },
+    });
+
+    if (existingSession) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Session already exists for this ASN on this router');
+    }
+
+    const sessionUuid = generateUUID();
+    const interfaceName = getInterfaceName(asn);
+    const sessionStatus = status === 1 ? PeeringStatus.ENABLED : PeeringStatus.PENDING_REVIEW;
+
+    try {
+        await models.bgpSessions.create({
+            uuid: sessionUuid,
+            router,
+            asn,
+            status: sessionStatus,
+            mtu: mtu || 1420,
+            policy: SessionPolicy.FULL,
+            ipv4: null,
+            ipv6: ipv6 || null,
+            ipv6LinkLocal: ipv6 || null,
+            type: 'wireguard',
+            extensions: null,
+            interface: interfaceName,
+            endpoint: endpoint || null,
+            credential: publicKey ? JSON.stringify({ pubkey: publicKey, psk: psk || null }) : null,
+            data: null,
+            lastError: null,
+        });
+
+        console.log(`[Admin] Created session ${sessionUuid} for AS${asn} on ${router} with status ${sessionStatus}`);
+
+        return success(c, {
+            uuid: sessionUuid,
+            status: sessionStatus,
+            message: `Session created with status: ${sessionStatus}`,
+        });
+    } catch (error) {
+        console.error('[Admin] Error creating session:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to create session');
     }
 }

@@ -26,7 +26,7 @@ export function registerConfirmHandlers(bot: Bot<BotContext>) {
         await ctx.editMessageText('⏳ Creating peer...\n正在创建 Peer...');
 
         try {
-            const action = flow.isAdminMode ? 'adminCreate' : 'create';
+            const action = flow.isAdminMode ? 'createSession' : 'create';
             const result = await apiRequest('/admin', 'POST', {
                 action,
                 asn,
