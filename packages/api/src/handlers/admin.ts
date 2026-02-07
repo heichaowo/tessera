@@ -5,6 +5,7 @@ import { getModels, getSequelize } from '../db/dbContext';
 import { getRedis } from '../db/redisContext';
 import config from '../config';
 import { PeeringStatus, SessionPolicy } from '../db/models/bgpSessions';
+import { Op } from 'sequelize';
 import { generateUUID, getInterfaceName, getListenPort } from '../common/helpers';
 
 interface JWTPayload {
@@ -427,14 +428,14 @@ async function deleteSessionAdmin(c: Context, body: { uuid?: string }): Promise<
 
     const models = getModels();
 
-    // First queue for delete (so agent can clean up)
+    // Only delete sessions that are not already queued for deletion
     const [updated] = await models.bgpSessions.update(
         { status: PeeringStatus.QUEUED_FOR_DELETE },
-        { where: { uuid: body.uuid } }
+        { where: { uuid: body.uuid, status: { [Op.ne]: PeeringStatus.QUEUED_FOR_DELETE } } }
     );
 
     if (!updated) {
-        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found or already queued for deletion');
     }
 
     return success(c, { message: 'Session queued for deletion' });

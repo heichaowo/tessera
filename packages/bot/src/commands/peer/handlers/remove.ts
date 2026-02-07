@@ -61,14 +61,16 @@ export function registerRemoveHandlers(bot: Bot<BotContext>) {
 
             if (result.code !== 0) {
                 await ctx.editMessageText(`❌ Failed to remove: ${result.message}`);
-                return;
+            } else {
+                await ctx.editMessageText('✅ Peer removed successfully!\n成功删除 Peer!');
             }
-
-            await ctx.editMessageText('✅ Peer removed successfully!\n成功删除 Peer!');
         } catch (error) {
             console.error('[Remove] Error:', error);
             await ctx.editMessageText('❌ Failed to remove peer.');
         }
+
+        // Always clear flow state after processing
+        ctx.session.peerFlow = undefined;
     });
 
     /**

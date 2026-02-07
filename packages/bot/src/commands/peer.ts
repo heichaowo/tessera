@@ -2237,7 +2237,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            const sessions = result.data?.sessions || [];
+            const sessions = (result.data?.sessions || [])
+                .filter((s: { status: number }) => s.status !== 5); // Exclude QUEUED_FOR_DELETE
 
             if (sessions.length === 0) {
                 await ctx.reply(`ℹ️ AS${targetAsn} has no peers to remove.\nAS${targetAsn} 没有可删除的 Peer`);
