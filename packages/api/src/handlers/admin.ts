@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 import { verify } from 'hono/jwt';
 import { makeResponse, ResponseCode, success } from '../common/response';
-import { getModels } from '../db/dbContext';
+import { getModels, getSequelize } from '../db/dbContext';
 import { getRedis } from '../db/redisContext';
 import config from '../config';
 import { PeeringStatus, SessionPolicy } from '../db/models/bgpSessions';
@@ -705,16 +705,12 @@ async function getStats(c: Context): Promise<Response> {
     const models = getModels();
 
     try {
-        const totalPeers = await models.bgpSessions.count();
-        const activePeers = await models.bgpSessions.count({
-            where: { status: PeeringStatus.ENABLED },
-        });
-        const pendingPeers = await models.bgpSessions.count({
-            where: { status: PeeringStatus.PENDING_REVIEW },
-        });
-        const totalNodes = await models.routers.count();
-        // Active nodes = count all routers (no status field on router model)
-        const activeNodes = totalNodes;
+        const [totalPeers, activePeers, pendingPeers, totalNodes] = await Promise.all([
+            models.bgpSessions.count(),
+            models.bgpSessions.count({ where: { status: PeeringStatus.ENABLED } }),
+            models.bgpSessions.count({ where: { status: PeeringStatus.PENDING_REVIEW } }),
+            models.routers.count(),
+        ]);
 
         return success(c, {
             stats: {
@@ -722,7 +718,7 @@ async function getStats(c: Context): Promise<Response> {
                 activePeers,
                 pendingPeers,
                 totalNodes,
-                activeNodes,
+                activeNodes: totalNodes,
             },
         });
     } catch (error) {
@@ -776,17 +772,19 @@ async function migrateSession(c: Context, body: {
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Session already exists on target router');
     }
 
+    const sequelize = getSequelize();
+    const t = await sequelize.transaction();
+
     try {
         // Queue old session for deletion
         await models.bgpSessions.update(
             { status: PeeringStatus.QUEUED_FOR_DELETE },
-            { where: { uuid } }
+            { where: { uuid }, transaction: t }
         );
 
         // Create new session on target router
         const newUuid = generateUUID();
         const interfaceName = getInterfaceName(asn);
-        const listenPort = getListenPort(asn);
 
         await models.bgpSessions.create({
             uuid: newUuid,
@@ -806,7 +804,9 @@ async function migrateSession(c: Context, body: {
             data: null,
             lastError: null,
             contact: sessionData.contact || null,
-        });
+        }, { transaction: t });
+
+        await t.commit();
 
         console.log(`[Admin] Migrated session AS${asn}: ${oldRouter} -> ${newRouter} (old: ${uuid}, new: ${newUuid})`);
 
@@ -818,6 +818,7 @@ async function migrateSession(c: Context, body: {
             newRouter,
         });
     } catch (error) {
+        await t.rollback();
         console.error('[Admin] Error migrating session:', error);
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to migrate session');
     }
