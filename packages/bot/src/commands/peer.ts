@@ -959,18 +959,42 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         return;
                     }
 
-                    // Migration is complex - for now just update the router info
-                    await ctx.reply(
-                        `⚠️ Node migration to \`${selectedNodeName}\` requires manual operation.\n` +
-                        `节点迁移到 \`${selectedNodeName}\` 需要手动操作。\n\n` +
-                        `Please contact admin for node migration.`,
-                        { parse_mode: 'Markdown' }
-                    );
-                } catch {
-                    await ctx.reply('❌ Failed to fetch node info');
+                    const sessionUuid = flow.routerUuid;
+                    if (!sessionUuid) {
+                        await ctx.reply('❌ Error: No session UUID');
+                        ctx.session.peerFlow = undefined;
+                        return;
+                    }
+
+                    // Call migrate API - agent will auto delete on old node and create on new node
+                    const migrateResult = await apiRequest('/admin', 'POST', {
+                        action: 'migrate',
+                        uuid: sessionUuid,
+                        newRouter: targetNode.uuid,
+                    }, config.apiToken);
+
+                    if (migrateResult.code !== 0) {
+                        await ctx.reply(
+                            `❌ Migration failed: ${migrateResult.message}`,
+                            { reply_markup: { remove_keyboard: true } }
+                        );
+                    } else {
+                        await ctx.reply(
+                            `✅ *Peer Migration Initiated*\nPeer 迁移已启动\n\n` +
+                            `From: \`${flow.routerName}\` → To: \`${selectedNodeName}\`\n\n` +
+                            `Your peer will be automatically recreated on the new node.\n` +
+                            `Peer 将在新节点上自动重建。\n\n` +
+                            `⏳ Please wait a few minutes for changes to apply.\n` +
+                            `请等待几分钟让更改生效。`,
+                            { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
+                        );
+                    }
+                } catch (error) {
+                    console.error('[modify_region] Error:', error);
+                    await ctx.reply('❌ Migration failed\n迁移失败', { reply_markup: { remove_keyboard: true } });
                 }
 
-                await showModifyMenu(ctx);
+                ctx.session.peerFlow = undefined;
                 return;
             }
 
