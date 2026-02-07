@@ -532,8 +532,12 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     diffLines.push('Tunnel:');
 
                     // Endpoint diff
-                    const oldEndpoint = backup.endpoint ? `${backup.endpoint}:${backup.port}` : 'Not set';
-                    const newEndpoint = current.endpoint ? `${current.endpoint}:${current.port}` : 'Not set';
+                    const oldEndpoint = backup.endpoint
+                        ? (backup.port ? `${backup.endpoint}:${backup.port}` : backup.endpoint)
+                        : 'Not set';
+                    const newEndpoint = current.endpoint
+                        ? (current.port ? `${current.endpoint}:${current.port}` : current.endpoint)
+                        : 'Not set';
                     if (oldEndpoint !== newEndpoint) {
                         diffLines.push(`    Endpoint:    ${oldEndpoint}`);
                         diffLines.push('  ->');
@@ -803,8 +807,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     if (current.localIpv4 !== backup?.localIpv4) {
                         requestBody.localIpv4 = current.localIpv4 || null;
                     }
-                    if (current.endpoint !== backup?.endpoint) {
-                        requestBody.endpoint = current.endpoint || null;
+                    if (current.endpoint !== backup?.endpoint || current.port !== backup?.port) {
+                        const fullEndpoint = current.endpoint
+                            ? (current.port ? `${current.endpoint}:${current.port}` : current.endpoint)
+                            : null;
+                        requestBody.endpoint = fullEndpoint;
                     }
                     if (current.mtu !== backup?.mtu) {
                         requestBody.mtu = current.mtu;
@@ -1855,7 +1862,20 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             // Resolve endpoint: prefer DB endpoint, fall back to credential endpoint
-            const resolvedEndpoint = session.endpoint || credEndpoint || '';
+            const rawEndpoint = session.endpoint || credEndpoint || '';
+
+            // Parse host:port from the resolved endpoint
+            let resolvedHost = rawEndpoint;
+            let resolvedPort = '';
+            if (rawEndpoint && rawEndpoint.includes(':')) {
+                const parts = rawEndpoint.split(':');
+                const lastPart = parts[parts.length - 1];
+                // Only treat as port if the last segment is purely numeric
+                if (lastPart && /^\d+$/.test(lastPart)) {
+                    resolvedPort = lastPart;
+                    resolvedHost = parts.slice(0, -1).join(':');
+                }
+            }
 
             // Parse extensions
             const extensions = session.extensions || '';
@@ -1869,8 +1889,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 routerName: session.routerName || session.router,
                 asn: session.asn,
                 backup: {
-                    endpoint: resolvedEndpoint,
-                    port: credListenPort,
+                    endpoint: resolvedHost,
+                    port: resolvedPort,
                     ipv6: session.ipv6 || '',
                     ipv4: session.ipv4 || '',
                     localIpv6: session.ipv6LinkLocal || '',
@@ -1884,8 +1904,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 },
                 // Current values (will be modified by user)
                 current: {
-                    endpoint: resolvedEndpoint,
-                    port: credListenPort,
+                    endpoint: resolvedHost,
+                    port: resolvedPort,
                     ipv6: session.ipv6 || '',
                     ipv4: session.ipv4 || '',
                     localIpv6: session.ipv6LinkLocal || '',
@@ -1902,7 +1922,9 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             // Build current info display
             const channel = hasMpbgp ? 'IPv6 & IPv4' : 'IPv6 only';
             const mpbgpText = hasMpbgp ? (hasEnh ? 'IPv6 (ENH)' : 'IPv6') : 'Not supported';
-            const endpointDisplay = resolvedEndpoint || 'Not set';
+            const endpointDisplay = resolvedHost
+                ? (resolvedPort ? `${resolvedHost}:${resolvedPort}` : resolvedHost)
+                : 'Not set';
 
             const currentInfo =
                 `\`\`\`CurrentInfo\n` +
