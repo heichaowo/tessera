@@ -625,7 +625,13 @@ async function createSessionAdmin(c: Context, body: {
             extensions: null,
             interface: interfaceName,
             endpoint: endpoint || null,
-            credential: publicKey || null,
+            credential: publicKey ? JSON.stringify({
+                public_key: publicKey,
+                preshared_key: psk || null,
+                listen_port: null,
+                endpoint: endpoint || null,
+                mtu: mtu || 1420,
+            }) : null,
             data: null,
             lastError: null,
         });
