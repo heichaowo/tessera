@@ -1,5 +1,5 @@
 import type { Bot } from 'grammy';
-import { InlineKeyboard, Keyboard } from 'grammy';
+import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
 import { isChinaIP, resolveEndpoint, CN_REJECTION_MESSAGE } from '../providers/chinaIp';
@@ -179,52 +179,82 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
             const routers = result.data.routers;
 
-            // Build node display with status
-            let nodeListText = '📡 *Node List 节点列表*\n\n';
-            const nodeMap: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number }> = {};
-            const peerableNodes: string[] = [];
+            if (routers.length === 0) {
+                await ctx.reply('❌ No available nodes.\n没有可用节点');
+                return;
+            }
+
+            // Build node list message with detailed info (same style as /addpeer)
+            let msgText = '🛰 *Node List 节点列表*\n\n';
+            const nodeMap: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number; name: string }> = {};
+            const couldPeer: string[] = [];
 
             for (const r of routers) {
-                const label = `${r.name} (${r.region || r.location || 'Unknown'})`;
-                let status = '';
+                // Build label: NAME | City | Provider (same as /addpeer)
+                const nodeName = r.name.toUpperCase();
+                const city = r.location || '';
+                const provider = r.provider || '';
+                const label = provider ? `${nodeName} | ${city} | ${provider}` : `${nodeName} | ${city}`;
+
+                // Status section - multi-line per node (same as /addpeer)
+                let statusLines = `- ${label}\n`;
 
                 if (r.isOpen) {
-                    status += '✅ Open ';
-                    peerableNodes.push(label);
+                    statusLines += `  🟢 Open For Peer\n`;
+                } else {
+                    statusLines += `  🔴 Closed\n`;
+                }
+
+                // Capacity
+                const current = r.sessionCount || 0;
+                const max = r.maxPeers || 0;
+                if (max > 0) {
+                    statusLines += `  👥 Capacity: ${current} / ${max}\n`;
+                } else {
+                    statusLines += `  👥 Capacity: ${current} / Unlimited\n`;
+                }
+
+                // IPv4/IPv6 support - only show if not supported
+                if (r.supportsIpv4 === false) {
+                    statusLines += `  ⚠️ IPv4: No\n`;
+                }
+                if (r.supportsIpv6 === false) {
+                    statusLines += `  ⚠️ IPv6: No\n`;
+                }
+
+                // CN peer restriction
+                if (r.allowCnPeers === false) {
+                    statusLines += `  🚫 Not allowed to peer with Chinese Mainland\n`;
+                }
+
+                msgText += statusLines + '\n';
+
+                // Add to selectable list if open and has capacity
+                const hasCapacity = max === 0 || current < max;
+                if (r.isOpen && hasCapacity) {
+                    couldPeer.push(label);
                     nodeMap[label] = {
                         uuid: r.uuid,
-                        endpoint: `${r.name}.dn42.moenet.work`,
+                        endpoint: r.endpoint || `${r.name}.dn42.moenet.work`,
                         pubkey: r.wgPublicKey || 'N/A',
                         nodeId: r.nodeId || 0,
                         regionCode: r.regionCode || 0,
+                        name: r.name,
                     };
-                } else {
-                    status += '❌ Closed ';
                 }
-
-                if (r.maxPeers && r.maxPeers > 0) {
-                    const current = r.currentPeers || 0;
-                    if (current >= r.maxPeers) {
-                        status += `📊 Full (${current}/${r.maxPeers})`;
-                    } else {
-                        status += `📊 ${current}/${r.maxPeers}`;
-                    }
-                }
-
-                nodeListText += `• \`${label}\` ${status}\n`;
             }
 
-            if (peerableNodes.length === 0) {
+            if (couldPeer.length === 0) {
                 await ctx.reply(
-                    `${nodeListText}\n❌ No available nodes for peering.\n没有可用节点`,
-                    { parse_mode: 'Markdown' }
+                    `${msgText}\n❌ 当前没有可 Peer 的节点 / No available nodes for peering`,
+                    { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
                 );
                 return;
             }
 
             // Auto-select if only one node
-            if (peerableNodes.length === 1) {
-                const selectedLabel = peerableNodes[0] || '';
+            if (couldPeer.length === 1) {
+                const selectedLabel = couldPeer[0] || '';
                 const nodeInfo = nodeMap[selectedLabel];
                 if (!nodeInfo || !selectedLabel) return;
 
@@ -232,7 +262,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
                 ctx.session.peerFlow = {
                     step: 'show_wg_info',
-                    routerName: selectedLabel.split(' (')[0],
+                    routerName: nodeInfo.name,
                     routerUuid: nodeInfo.uuid,
                     serverEndpoint: nodeInfo.endpoint,
                     serverPort: userPort,
@@ -242,7 +272,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 };
 
                 await ctx.reply(
-                    `${nodeListText}\n只有一个可选节点，自动选择 \`${selectedLabel}\``,
+                    `${msgText}\n只有一个可选节点，自动选择 \`${selectedLabel}\``,
                     { parse_mode: 'Markdown' }
                 );
 
@@ -251,23 +281,28 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            // Build ReplyKeyboard for node selection
-            const keyboard = new Keyboard();
-            peerableNodes.forEach((label, i) => {
-                const nodeName = (label || '').split(' (')[0] || '';
-                keyboard.text(nodeName);
-                if ((i + 1) % 2 === 0) keyboard.row();
-            });
-            keyboard.resized().oneTime();
-
+            // Save nodeMap to session
             ctx.session.peerFlow = {
                 step: 'select_node',
                 nodeMap,
             };
 
+            // Send node list
+            await ctx.reply(msgText, { parse_mode: 'Markdown' });
+
+            // Build ReplyKeyboard with one row per option (same as /addpeer)
+            const keyboard: { text: string }[][] = couldPeer.map(label => [{ text: label }]);
+
+            // Send selection prompt with ReplyKeyboard
             await ctx.reply(
-                `${nodeListText}\n选择节点 / Select node:`,
-                { parse_mode: 'Markdown', reply_markup: keyboard }
+                '选择节点 / Select node:',
+                {
+                    reply_markup: {
+                        keyboard,
+                        resize_keyboard: true,
+                        one_time_keyboard: true,
+                    }
+                }
             );
         } catch (error) {
             console.error('[Peer] Error:', error);
@@ -329,20 +364,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     return;
                 }
 
-                // Find matching node by name
-                const matchedLabel = Object.keys(nodeMap).find(label => {
-                    const nodeName = label.split(' (')[0] || '';
-                    return nodeName.toLowerCase() === text.toLowerCase();
-                });
+                // Match by exact label (keyboard sends full label)
+                const nodeInfo = nodeMap[text];
 
-                if (!matchedLabel) {
-                    await ctx.reply('❌ Invalid node. Please select from the list.\n无效节点，请从列表中选择。', { reply_markup: { remove_keyboard: true } });
-                    return;
-                }
-
-                const nodeInfo = nodeMap[matchedLabel];
                 if (!nodeInfo) {
-                    await ctx.reply('❌ Node info not found', { reply_markup: { remove_keyboard: true } });
+                    await ctx.reply('❌ Invalid node. Please select from the list.\n无效节点，请从列表中选择。', { reply_markup: { remove_keyboard: true } });
                     return;
                 }
 
@@ -352,7 +378,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 ctx.session.peerFlow = {
                     ...flow,
                     step: 'await_continue',
-                    routerName: matchedLabel.split(' (')[0],
+                    routerName: nodeInfo.name || text.split(' (')[0] || text,
                     routerUuid: nodeInfo.uuid,
                     serverEndpoint: nodeInfo.endpoint,
                     serverPort: userPort,
@@ -360,7 +386,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     serverLla: `fe80::998:${nodeInfo.regionCode}:${nodeInfo.nodeId}:1`,
                 };
 
-                await ctx.reply(`✅ Selected: ${matchedLabel}`, { reply_markup: { remove_keyboard: true } });
+                await ctx.reply(`✅ Selected: ${ctx.session.peerFlow.routerName}`, { reply_markup: { remove_keyboard: true } });
                 await showServerWgInfo(ctx);
                 return;
             }
