@@ -1644,7 +1644,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
                     try {
                         const result = await apiRequest('/admin', 'POST', {
-                            action: 'delete',
+                            action: 'deleteSession',
                             uuid,
                         }, config.apiToken);
 
@@ -2246,9 +2246,8 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
             // Build selection keyboard
             const keyboard = new InlineKeyboard();
-            sessions.forEach((s: { uuid: string; router: string; status: number }) => {
-                const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '❌';
-                keyboard.text(`${statusIcon} ${s.router}`, `remove:select:${s.uuid}`).row();
+            sessions.forEach((s: { uuid: string; router: string; routerName?: string; status: number }) => {
+                keyboard.text(`${s.routerName || s.router}`, `remove:select:${s.uuid}`).row();
             });
             keyboard.text('🚫 Cancel 取消', 'remove:cancel');
 

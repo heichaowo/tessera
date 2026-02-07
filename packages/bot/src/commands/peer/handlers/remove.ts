@@ -55,7 +55,7 @@ export function registerRemoveHandlers(bot: Bot<BotContext>) {
 
         try {
             const result = await apiRequest('/admin', 'POST', {
-                action: 'delete',
+                action: 'deleteSession',
                 uuid,
             }, config.apiToken);
 
