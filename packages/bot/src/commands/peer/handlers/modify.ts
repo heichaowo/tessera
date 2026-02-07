@@ -85,8 +85,11 @@ export function registerModifyHandlers(
             if (current.localIpv4 !== backup.localIpv4) {
                 requestBody.localIpv4 = current.localIpv4 || null;
             }
-            if (current.endpoint !== backup.endpoint) {
-                requestBody.endpoint = current.endpoint || null;
+            if (current.endpoint !== backup.endpoint || current.port !== backup.port) {
+                const fullEndpoint = current.endpoint
+                    ? (current.port ? `${current.endpoint}:${current.port}` : current.endpoint)
+                    : null;
+                requestBody.endpoint = fullEndpoint;
             }
             if (current.mtu !== backup.mtu) {
                 requestBody.mtu = current.mtu;
