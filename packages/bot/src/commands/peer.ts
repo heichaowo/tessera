@@ -1877,10 +1877,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 }
             }
 
-            // Parse extensions
-            const extensions = session.extensions || '';
-            const hasMpbgp = extensions.includes('mp_bgp') || extensions.includes('mpbgp');
-            const hasEnh = extensions.includes('extended_nexthop') || extensions.includes('enh');
+            // Parse extensions (handles both JSON array and string format)
+            const rawExt = session.extensions;
+            const extStr = Array.isArray(rawExt) ? rawExt.join(',') : (rawExt || '');
+            const hasMpbgp = extStr.includes('mp_bgp') || extStr.includes('mpbgp');
+            const hasEnh = extStr.includes('extended_nexthop') || extStr.includes('enh');
 
             // Store backup state for diff tracking (dn42-bot style)
             ctx.session.peerFlow = {

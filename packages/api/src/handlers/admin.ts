@@ -480,7 +480,13 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
     const updateData: Record<string, unknown> = {};
     for (const field of allowedFields) {
         if (field in updates) {
-            updateData[field] = updates[field];
+            // Convert extensions from comma-separated string to JSON array for JSONB column
+            if (field === 'extensions' && typeof updates[field] === 'string') {
+                const extStr = updates[field] as string;
+                updateData[field] = extStr ? extStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+            } else {
+                updateData[field] = updates[field];
+            }
         }
     }
 
@@ -590,9 +596,21 @@ async function createSessionAdmin(c: Context, body: {
     mtu?: number;
     psk?: string;
     status?: number;
+    extensions?: string;
 }): Promise<Response> {
-    const { asn, router, ipv6, endpoint, port, publicKey, mtu, psk, status } = body;
+    const { asn, router, ipv6, endpoint, port, publicKey, mtu, psk, status, extensions } = body;
     const fullEndpoint = endpoint ? (port ? `${endpoint}:${port}` : endpoint) : null;
+    // Default extensions to mp_bgp + extended_nexthop (recommended config)
+    // Store as JSON array for JSONB column (agent expects string[])
+    const defaultExtensions = ['mp_bgp', 'extended_nexthop'];
+    let sessionExtensions: string[];
+    if (extensions !== undefined) {
+        sessionExtensions = typeof extensions === 'string'
+            ? extensions.split(',').map(s => s.trim()).filter(Boolean)
+            : (extensions as unknown as string[]);
+    } else {
+        sessionExtensions = defaultExtensions;
+    }
 
     if (!asn || !router) {
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing required fields: asn, router');
@@ -635,7 +653,7 @@ async function createSessionAdmin(c: Context, body: {
             ipv6: ipv6 || null,
             ipv6LinkLocal: null,
             type: 'wireguard',
-            extensions: null,
+            extensions: (sessionExtensions.length > 0 ? sessionExtensions : null) as unknown as string,
             interface: interfaceName,
             endpoint: fullEndpoint,
             credential: publicKey ? JSON.stringify({
