@@ -5,7 +5,7 @@ import { getModels } from '../db/dbContext';
 import { getRedis } from '../db/redisContext';
 import config from '../config';
 import { PeeringStatus, SessionPolicy } from '../db/models/bgpSessions';
-import { generateUUID, getInterfaceName } from '../common/helpers';
+import { generateUUID, getInterfaceName, getListenPort } from '../common/helpers';
 
 interface JWTPayload {
     asn: string;
@@ -608,6 +608,7 @@ async function createSessionAdmin(c: Context, body: {
 
     const sessionUuid = generateUUID();
     const interfaceName = getInterfaceName(asn);
+    const listenPort = getListenPort(asn);
     const sessionStatus = status === 1 ? PeeringStatus.QUEUED_FOR_SETUP : PeeringStatus.PENDING_REVIEW;
 
     try {
@@ -628,7 +629,7 @@ async function createSessionAdmin(c: Context, body: {
             credential: publicKey ? JSON.stringify({
                 public_key: publicKey,
                 preshared_key: psk || null,
-                listen_port: null,
+                listen_port: listenPort,
                 endpoint: endpoint || null,
                 mtu: mtu || 1420,
             }) : null,
