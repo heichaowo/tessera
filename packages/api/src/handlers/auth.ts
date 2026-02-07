@@ -92,10 +92,12 @@ async function query(c: Context, body: AuthQueryInput): Promise<Response> {
 
     return success(c, {
         person,
+        mntBy: authInfo.mntBy || `AS${asn}-MNT`,
         authState,
         availableAuthMethods: availableAuthMethods.map(m => ({
             id: m.id,
             type: m.type,
+            value: m.data,
             name: m.type === AuthType.PGP_CLEAR_SIGN ? `PGP: ${m.data?.substring(0, 16)}...` :
                 m.type === AuthType.EMAIL ? m.data :
                     m.type === AuthType.SSH ? 'SSH Key' : 'Password',

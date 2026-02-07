@@ -43,6 +43,7 @@ export class WhoisProvider {
     async getAuthMethods(asn: number): Promise<AuthMethods> {
         const result: AuthMethods = {
             person: '',
+            mntBy: '',
             pgpFingerprints: [],
             emails: [],
             sshKeys: [],
@@ -59,6 +60,7 @@ export class WhoisProvider {
             // Get admin-c and mnt-by references
             const adminC = this.extractRef(this.getAttr(asnData, 'admin-c'));
             const mntBy = this.extractRef(this.getAttr(asnData, 'mnt-by'));
+            if (mntBy) result.mntBy = mntBy;
 
             // Look up maintainer for auth info
             if (mntBy) {
@@ -180,6 +182,7 @@ interface RegistryObject {
 
 export interface AuthMethods {
     person: string;
+    mntBy: string;
     pgpFingerprints: string[];
     emails: string[];
     sshKeys: string[];
