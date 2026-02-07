@@ -249,7 +249,7 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
             ipv4: s.ipv4,
             ipv6: s.ipv6,
             ipv6LinkLocal: s.ipv6LinkLocal,
-            type: s.type,
+            type: (s.type || '').toLowerCase(),
             extensions: typeof s.extensions === 'string' ? JSON.parse(s.extensions) : (s.extensions || []),
             interface: s.interface,
             endpoint: s.endpoint,
