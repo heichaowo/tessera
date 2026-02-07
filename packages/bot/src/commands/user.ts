@@ -338,22 +338,27 @@ async function verifySshSignatureFull(
  * Extracts the base64 body, strips all whitespace, and re-wraps at 70 chars.
  */
 function normalizeSshSignature(raw: string): string {
-    const trimmed = raw.trim();
+    // CRITICAL: Telegram auto-typography replaces consecutive hyphens (---)
+    // with em dash (—, U+2014) and en dash (–, U+2013). This breaks the
+    // SSH signature armor header/footer. Replace them back to ASCII hyphens.
+    const sanitized = raw.trim()
+        .replace(/\u2014/g, '--')   // em dash → two hyphens
+        .replace(/\u2013/g, '-');   // en dash → one hyphen
 
     // Try to find header and footer anywhere in the text
-    const headerMatch = trimmed.match(/-----BEGIN SSH SIGNATURE-----/);
-    const footerMatch = trimmed.match(/-----END SSH SIGNATURE-----/);
+    const headerMatch = sanitized.match(/-----BEGIN SSH SIGNATURE-----/);
+    const footerMatch = sanitized.match(/-----END SSH SIGNATURE-----/);
 
     if (!headerMatch || !footerMatch) {
         // Fallback: return as-is with trailing newline
-        return trimmed + '\n';
+        return sanitized + '\n';
     }
 
-    const headerEnd = trimmed.indexOf('-----BEGIN SSH SIGNATURE-----') + '-----BEGIN SSH SIGNATURE-----'.length;
-    const footerStart = trimmed.indexOf('-----END SSH SIGNATURE-----');
+    const headerEnd = sanitized.indexOf('-----BEGIN SSH SIGNATURE-----') + '-----BEGIN SSH SIGNATURE-----'.length;
+    const footerStart = sanitized.indexOf('-----END SSH SIGNATURE-----');
 
     // Extract everything between header and footer, strip ALL whitespace
-    const base64Body = trimmed.slice(headerEnd, footerStart).replace(/\s+/g, '');
+    const base64Body = sanitized.slice(headerEnd, footerStart).replace(/\s+/g, '');
 
     // Re-wrap at 70 chars per line
     const wrappedLines: string[] = [];
