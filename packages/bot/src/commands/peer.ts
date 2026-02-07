@@ -41,6 +41,7 @@ import {
     promptMtu,
     promptPsk,
     showConfirmation,
+    promptContact,
     // Handlers
     registerCreationHandlers,
     registerConfirmHandlers,
@@ -423,23 +424,61 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 // Handle PSK selection from ReplyKeyboard
                 if (text.includes('Auto') || text.includes('Generate') || text.includes('自动')) {
                     const psk = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
-                    ctx.session.peerFlow = { ...flow, step: 'confirm', psk };
+                    ctx.session.peerFlow = { ...flow, step: 'input_contact', psk };
                     await ctx.reply(
                         `🔑 *PSK Generated*\n\n\`${psk}\`\n\n` +
                         `⚠️ Save this key! You need it on your side.\n` +
                         `请保存此密钥，稍后配置时需要。`,
                         { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
                     );
-                    await showConfirmation(ctx);
+                    await promptContact(ctx);
                     return;
                 }
                 if (text.includes('No') || text.includes('不使用')) {
-                    ctx.session.peerFlow = { ...flow, step: 'confirm', psk: undefined };
+                    ctx.session.peerFlow = { ...flow, step: 'input_contact', psk: undefined };
                     await ctx.reply(`✅ PSK: Disabled`, { reply_markup: { remove_keyboard: true } });
-                    await showConfirmation(ctx);
+                    await promptContact(ctx);
                     return;
                 }
                 await ctx.reply('Please select a PSK option.\n请选择 PSK 选项。');
+                return;
+            }
+
+            case 'input_contact': {
+                // Handle contact selection from ReplyKeyboard
+                if (text.includes('Skip') || text.includes('跳过')) {
+                    ctx.session.peerFlow = { ...flow, step: 'confirm', contact: undefined };
+                    await ctx.reply('⏩ Contact skipped.\n已跳过联系方式。', { reply_markup: { remove_keyboard: true } });
+                    await showConfirmation(ctx);
+                    return;
+                }
+                if (text.includes('Manual') || text.includes('手动')) {
+                    ctx.session.peerFlow = { ...flow, step: 'input_contact_manual' };
+                    await ctx.reply(
+                        `✏️ *Manual Contact Input*\n手动输入联系方式\n\n` +
+                        `Enter your contact info (e-mail, Telegram, etc.):\n` +
+                        `请输入你的联系方式（邮箱、Telegram 等）：`,
+                        { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
+                    );
+                    return;
+                }
+                // User selected a contact from the list
+                const selectedContact = text.trim();
+                ctx.session.peerFlow = { ...flow, step: 'confirm', contact: selectedContact };
+                await ctx.reply(`✅ Contact: \`${selectedContact}\``, { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } });
+                await showConfirmation(ctx);
+                return;
+            }
+
+            case 'input_contact_manual': {
+                const manualContact = text.trim();
+                if (manualContact.length < 3 || manualContact.length > 200) {
+                    await ctx.reply('❌ Contact must be 3-200 characters.\n联系方式长度须为 3-200 个字符。');
+                    return;
+                }
+                ctx.session.peerFlow = { ...flow, step: 'confirm', contact: manualContact };
+                await ctx.reply(`✅ Contact: \`${manualContact}\``, { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } });
+                await showConfirmation(ctx);
                 return;
             }
 

@@ -7,6 +7,7 @@
 
 import { Keyboard, InlineKeyboard } from 'grammy';
 import type { BotContext } from '../../index';
+import { fetchContacts } from '../../services/dn42Registry';
 
 /**
  * Show server WireGuard info with ReplyKeyboard continue button
@@ -177,6 +178,54 @@ export async function promptPsk(ctx: BotContext): Promise<void> {
 }
 
 /**
+ * Prompt for contact selection with ReplyKeyboard.
+ * 
+ * Fetches NOC contacts from Burble DN42 registry and presents
+ * them as keyboard options, with manual input and skip fallbacks.
+ */
+export async function promptContact(ctx: BotContext): Promise<void> {
+    const flow = ctx.session.peerFlow;
+    if (!flow) return;
+
+    const asn = flow.isAdminMode ? flow.targetAsn : ctx.session.asn;
+    if (!asn) return;
+
+    await ctx.reply('🔍 Fetching contacts from DN42 registry...\n正在从 DN42 注册表获取联系方式...');
+
+    const contacts = await fetchContacts(asn);
+
+    const keyboard = new Keyboard();
+
+    if (contacts.length > 0) {
+        // Add each contact as a button
+        for (const contact of contacts) {
+            keyboard.text(contact).row();
+        }
+    }
+
+    keyboard
+        .text('✏️ Manual input 手动输入')
+        .row()
+        .text('⏩ Skip 跳过')
+        .resized()
+        .oneTime();
+
+    const contactList = contacts.length > 0
+        ? `Found contacts 找到的联系方式:\n${contacts.map(c => `• \`${c}\``).join('\n')}\n\n`
+        : 'No contacts found in registry.\n未在注册表中找到联系方式。\n\n';
+
+    ctx.session.peerFlow = { ...flow, step: 'input_contact' };
+
+    await ctx.reply(
+        `📞 *Step 6: Contact Info*\n第六步: 联系方式\n\n` +
+        contactList +
+        `Select a contact or enter manually.\n` +
+        `选择一个联系方式或手动输入。`,
+        { parse_mode: 'Markdown', reply_markup: keyboard }
+    );
+}
+
+/**
  * Show confirmation screen (keeps InlineKeyboard for final action)
  */
 export async function showConfirmation(ctx: BotContext): Promise<void> {
@@ -192,6 +241,7 @@ export async function showConfirmation(ctx: BotContext): Promise<void> {
             : 'None (NAT)';
 
     const pskDisplay = flow.psk ? '✅ Enabled' : '❌ Disabled';
+    const contactDisplay = flow.contact ? `\`${flow.contact}\`` : 'Not set';
 
     const confirmText =
         `✅ *Confirm Peer Creation*\n确认创建 Peer\n\n` +
@@ -201,7 +251,8 @@ export async function showConfirmation(ctx: BotContext): Promise<void> {
         `📡 Your Endpoint: ${endpointDisplay}\n` +
         `🔑 Your PublicKey: \`${flow.publicKey?.slice(0, 20)}...\`\n` +
         `📏 MTU: \`${flow.mtu || 1420}\`\n` +
-        `🔐 PSK: ${pskDisplay}\n\n` +
+        `🔐 PSK: ${pskDisplay}\n` +
+        `📞 Contact: ${contactDisplay}\n\n` +
         `*Server Info:*\n` +
         `🌐 Endpoint: \`${flow.serverEndpoint}:${flow.serverPort}\`\n` +
         `🔑 PublicKey: \`${flow.serverPubkey}\`\n` +

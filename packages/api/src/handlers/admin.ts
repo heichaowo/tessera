@@ -597,8 +597,9 @@ async function createSessionAdmin(c: Context, body: {
     psk?: string;
     status?: number;
     extensions?: string;
+    contact?: string;
 }): Promise<Response> {
-    const { asn, router, ipv6, endpoint, port, publicKey, mtu, psk, status, extensions } = body;
+    const { asn, router, ipv6, endpoint, port, publicKey, mtu, psk, status, extensions, contact } = body;
     const fullEndpoint = endpoint ? (port ? `${endpoint}:${port}` : endpoint) : null;
     // Default extensions to mp_bgp + extended_nexthop (recommended config)
     // Store as JSON array for JSONB column (agent expects string[])
@@ -666,6 +667,7 @@ async function createSessionAdmin(c: Context, body: {
             }) : null,
             data: null,
             lastError: null,
+            contact: contact || null,
         });
 
         console.log(`[Admin] Created session ${sessionUuid} for AS${asn} on ${router} with status ${sessionStatus}`);

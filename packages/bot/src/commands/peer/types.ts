@@ -17,6 +17,8 @@ export const PEER_CREATE_STEPS = {
     INPUT_PUBKEY: 'input_pubkey',
     INPUT_MTU: 'input_mtu',
     INPUT_PSK: 'input_psk',
+    INPUT_CONTACT: 'input_contact',
+    INPUT_CONTACT_MANUAL: 'input_contact_manual',
     CONFIRM: 'confirm',
 } as const;
 

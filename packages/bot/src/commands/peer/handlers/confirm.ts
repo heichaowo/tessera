@@ -36,6 +36,7 @@ export function registerConfirmHandlers(bot: Bot<BotContext>) {
                 publicKey: flow.publicKey,
                 mtu: flow.mtu || 1420,
                 psk: flow.psk,
+                contact: flow.contact || undefined,
                 status: flow.isAdminMode ? 1 : undefined,
             }, config.apiToken);
 

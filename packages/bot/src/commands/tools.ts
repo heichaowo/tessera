@@ -3,6 +3,7 @@ import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
 import { getNodes, getAgentEndpoint } from '../providers/nodes';
+import { lookupWhois, formatWhoisResult, getWhoisAttr } from '../services/dn42Registry';
 
 /**
  * Execute tool on agent node(s)
@@ -423,55 +424,4 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             }
         }
     });
-}
-
-/**
- * Lookup WHOIS using Burble REST API
- */
-async function lookupWhois(query: string): Promise<WhoisResult | null> {
-    const baseUrl = 'https://explorer.burble.com/api/registry';
-
-    // Detect object type
-    const q = query.toUpperCase();
-    let objectType = 'mntner';
-    if (q.startsWith('AS') && /^\d+$/.test(q.substring(2))) objectType = 'aut-num';
-    else if (q.endsWith('-MNT')) objectType = 'mntner';
-    else if (q.endsWith('-DN42')) objectType = 'person';
-    else if (q.includes('/')) objectType = q.includes(':') ? 'route6' : 'route';
-    else if (q.includes(':')) objectType = 'inet6num';
-    else if (/^\d+\.\d+\.\d+\.\d+/.test(q)) objectType = 'inetnum';
-
-    const objectKey = objectType === 'aut-num' ? query.toUpperCase() : query;
-
-    try {
-        const response = await fetch(`${baseUrl}/${objectType}/${objectKey}`);
-        if (!response.ok) return null;
-
-        const data = await response.json() as Record<string, WhoisResult>;
-        const key = `${objectType}/${objectKey}`;
-        return data[key] || null;
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Format WHOIS result as text
- */
-function formatWhoisResult(data: WhoisResult): string {
-    if (!data.Attributes) return 'No data';
-    return data.Attributes.map(([key, value]) => `${key}: ${value}`).join('\n');
-}
-
-/**
- * Get single attribute from WHOIS result
- */
-function getWhoisAttr(data: WhoisResult, key: string): string | undefined {
-    const attr = data.Attributes?.find(a => a[0] === key);
-    return attr ? attr[1] : undefined;
-}
-
-interface WhoisResult {
-    Attributes: [string, string][];
-    Backlinks?: string[];
 }
