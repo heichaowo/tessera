@@ -879,7 +879,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     const result = await submitModifyChanges(flow);
 
                     if (!result.success) {
-                        await ctx.reply(`❌ ${result.message}`);
+                        await ctx.reply(`❌ ${result.message}`, { reply_markup: { remove_keyboard: true } });
                         ctx.session.peerFlow = undefined;
                         return;
                     }
@@ -893,7 +893,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                             `Peer 将在新节点上自动重建。\n\n` +
                             `⏳ Please wait a few minutes for changes to apply.\n` +
                             `请等待几分钟让更改生效。`,
-                            { parse_mode: 'Markdown' }
+                            { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
                         );
                     } else {
                         await ctx.reply(
@@ -902,12 +902,12 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                             `Node: \`${flow.routerName}\`\n` +
                             `Changes will be applied within a few minutes.\n` +
                             `更改将在几分钟内生效。`,
-                            { parse_mode: 'Markdown' }
+                            { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
                         );
                     }
                 } catch (error) {
                     console.error('[modify_confirm] Error:', error);
-                    await ctx.reply(`❌ Failed to submit changes: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    await ctx.reply(`❌ Failed to submit changes: ${error instanceof Error ? error.message : 'Unknown error'}`, { reply_markup: { remove_keyboard: true } });
                 }
                 ctx.session.peerFlow = undefined;
                 return;
