@@ -101,12 +101,44 @@ export function registerModifyHandlers(
                 requestBody.extensions = (current.mpbgp ? 'mp_bgp' : '') + (current.extendedNexthop ? ',extended_nexthop' : '');
             }
 
-            console.log('[modify:submit] Request body:', JSON.stringify(requestBody));
-            const result = await apiRequest('/admin', 'POST', requestBody, config.apiToken);
-            console.log('[modify:submit] Response:', JSON.stringify(result));
+            // Submit field changes first (if any)
+            const hasFieldChanges = Object.keys(requestBody).length > 2;
+            if (hasFieldChanges) {
+                console.log('[modify:submit] Request body:', JSON.stringify(requestBody));
+                const result = await apiRequest('/admin', 'POST', requestBody, config.apiToken);
+                console.log('[modify:submit] Response:', JSON.stringify(result));
 
-            if (result.code !== 0) {
-                await ctx.reply(`❌ Failed: ${result.message}`);
+                if (result.code !== 0) {
+                    await ctx.reply(`❌ Failed to update: ${result.message}`);
+                    ctx.session.peerFlow = undefined;
+                    return;
+                }
+            }
+
+            // Execute pending migration if set
+            if (flow.pendingMigration) {
+                const migrateResult = await apiRequest('/admin', 'POST', {
+                    action: 'migrate',
+                    uuid,
+                    newRouter: flow.pendingMigration.nodeUuid,
+                }, config.apiToken);
+
+                if (migrateResult.code !== 0) {
+                    await ctx.reply(`❌ Migration failed: ${migrateResult.message}`);
+                    ctx.session.peerFlow = undefined;
+                    return;
+                }
+
+                await ctx.reply(
+                    `✅ *Changes submitted & migration initiated!*\n` +
+                    `修改已提交，迁移已启动！\n\n` +
+                    `From: \`${flow.routerName}\` → To: \`${flow.pendingMigration.nodeName}\`\n\n` +
+                    `Peer will be automatically recreated on the new node.\n` +
+                    `Peer 将在新节点上自动重建。\n\n` +
+                    `⏳ Please wait a few minutes for changes to apply.\n` +
+                    `请等待几分钟让更改生效。`,
+                    { parse_mode: 'Markdown' }
+                );
             } else {
                 await ctx.reply(
                     `✅ Modification submitted successfully!\n` +

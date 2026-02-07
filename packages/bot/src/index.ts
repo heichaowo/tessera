@@ -37,6 +37,8 @@ interface SessionData {
         nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number; name?: string }>;
         // For modify flow - diff tracking (dn42-bot style)
         asn?: number;
+        // Pending migration (deferred until confirm)
+        pendingMigration?: { nodeUuid: string; nodeName: string };
         backup?: {
             endpoint: string;
             port: string;

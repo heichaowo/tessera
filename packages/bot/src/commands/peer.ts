@@ -537,9 +537,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         return;
                     }
 
-                    // Check if any changes were made
-                    const hasChanges = JSON.stringify(backup) !== JSON.stringify(current);
-                    if (!hasChanges) {
+                    // Check if any changes were made (including pending migration)
+                    const hasFieldChanges = JSON.stringify(backup) !== JSON.stringify(current);
+                    const hasMigration = !!flow.pendingMigration;
+                    if (!hasFieldChanges && !hasMigration) {
                         ctx.session.peerFlow = undefined;
                         await ctx.reply(
                             'No changes detected, operation cancelled.\n未检测到任何变更，操作已取消。',
@@ -551,7 +552,13 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     // Build diff text showing changes
                     const diffLines: string[] = [];
                     diffLines.push('Region:');
-                    diffLines.push(`    ${flow.routerName || 'Unknown'}`);
+                    if (flow.pendingMigration) {
+                        diffLines.push(`    ${flow.routerName || 'Unknown'}`);
+                        diffLines.push('  ->');
+                        diffLines.push(`      ${flow.pendingMigration.nodeName}`);
+                    } else {
+                        diffLines.push(`    ${flow.routerName || 'Unknown'}`);
+                    }
 
                     // Basic section
                     diffLines.push('Basic:');
@@ -907,12 +914,44 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     if (current.mpbgp !== backup?.mpbgp || current.extendedNexthop !== backup?.extendedNexthop) {
                         requestBody.extensions = (current.mpbgp ? 'mp_bgp' : '') + (current.extendedNexthop ? ',extended_nexthop' : '');
                     }
-                    console.log('[modify_confirm] Request body:', JSON.stringify(requestBody));
-                    const result = await apiRequest('/admin', 'POST', requestBody, config.apiToken);
-                    console.log('[modify_confirm] Response:', JSON.stringify(result));
+                    // Submit field changes first (if any)
+                    const hasFieldChanges = Object.keys(requestBody).length > 2; // more than action + uuid
+                    if (hasFieldChanges) {
+                        console.log('[modify_confirm] Request body:', JSON.stringify(requestBody));
+                        const result = await apiRequest('/admin', 'POST', requestBody, config.apiToken);
+                        console.log('[modify_confirm] Response:', JSON.stringify(result));
 
-                    if (result.code !== 0) {
-                        await ctx.reply(`❌ Failed: ${result.message}`);
+                        if (result.code !== 0) {
+                            await ctx.reply(`❌ Failed to update: ${result.message}`);
+                            ctx.session.peerFlow = undefined;
+                            return;
+                        }
+                    }
+
+                    // Execute pending migration if set
+                    if (flow.pendingMigration) {
+                        const migrateResult = await apiRequest('/admin', 'POST', {
+                            action: 'migrate',
+                            uuid,
+                            newRouter: flow.pendingMigration.nodeUuid,
+                        }, config.apiToken);
+
+                        if (migrateResult.code !== 0) {
+                            await ctx.reply(`❌ Migration failed: ${migrateResult.message}`);
+                            ctx.session.peerFlow = undefined;
+                            return;
+                        }
+
+                        await ctx.reply(
+                            `✅ *Changes submitted & migration initiated!*\n` +
+                            `修改已提交，迁移已启动！\n\n` +
+                            `From: \`${flow.routerName}\` → To: \`${flow.pendingMigration.nodeName}\`\n\n` +
+                            `Peer will be automatically recreated on the new node.\n` +
+                            `Peer 将在新节点上自动重建。\n\n` +
+                            `⏳ Please wait a few minutes for changes to apply.\n` +
+                            `请等待几分钟让更改生效。`,
+                            { parse_mode: 'Markdown' }
+                        );
                     } else {
                         await ctx.reply(
                             `✅ Modification submitted successfully!\n` +
@@ -959,42 +998,28 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         return;
                     }
 
-                    const sessionUuid = flow.routerUuid;
-                    if (!sessionUuid) {
-                        await ctx.reply('❌ Error: No session UUID');
-                        ctx.session.peerFlow = undefined;
-                        return;
-                    }
+                    // Store pending migration (will execute on confirm)
+                    ctx.session.peerFlow = {
+                        ...flow,
+                        step: 'modify_menu',
+                        pendingMigration: {
+                            nodeUuid: targetNode.uuid,
+                            nodeName: selectedNodeName,
+                        },
+                    };
 
-                    // Call migrate API - agent will auto delete on old node and create on new node
-                    const migrateResult = await apiRequest('/admin', 'POST', {
-                        action: 'migrate',
-                        uuid: sessionUuid,
-                        newRouter: targetNode.uuid,
-                    }, config.apiToken);
-
-                    if (migrateResult.code !== 0) {
-                        await ctx.reply(
-                            `❌ Migration failed: ${migrateResult.message}`,
-                            { reply_markup: { remove_keyboard: true } }
-                        );
-                    } else {
-                        await ctx.reply(
-                            `✅ *Peer Migration Initiated*\nPeer 迁移已启动\n\n` +
-                            `From: \`${flow.routerName}\` → To: \`${selectedNodeName}\`\n\n` +
-                            `Your peer will be automatically recreated on the new node.\n` +
-                            `Peer 将在新节点上自动重建。\n\n` +
-                            `⏳ Please wait a few minutes for changes to apply.\n` +
-                            `请等待几分钟让更改生效。`,
-                            { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
-                        );
-                    }
-                } catch (error) {
-                    console.error('[modify_region] Error:', error);
-                    await ctx.reply('❌ Migration failed\n迁移失败', { reply_markup: { remove_keyboard: true } });
+                    await ctx.reply(
+                        `✅ Region change queued: → \`${selectedNodeName}\`\n` +
+                        `区域变更已暂存: → \`${selectedNodeName}\`\n\n` +
+                        `⚠️ Migration will execute after you confirm all changes.\n` +
+                        `迁移将在你确认所有更改后执行。`,
+                        { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
+                    );
+                } catch {
+                    await ctx.reply('❌ Failed to fetch node info');
                 }
 
-                ctx.session.peerFlow = undefined;
+                await showModifyMenu(ctx);
                 return;
             }
 
