@@ -244,11 +244,15 @@ async function verifyGpgSignatureFull(
 // =============================================================================
 
 /**
- * Full SSH signature verification
- * Follows the same approach as the old Python project:
- * - Uses spawn with argument array (no shell)
- * - Pipes challenge via stdin
- * - Normalizes SSH signature armor to handle Telegram line wrapping
+ * Full SSH signature verification.
+ *
+ * Handles all Telegram formatting issues:
+ * - Unicode dash substitution (em dash, en dash, etc.)
+ * - Arbitrary line wrapping of base64 body
+ * - Zero-width characters
+ *
+ * Uses spawn with argument array (no shell) and pipes challenge via stdin,
+ * matching the old Python project's subprocess.run approach.
  */
 async function verifySshSignatureFull(
     signature: string,
@@ -262,18 +266,9 @@ async function verifySshSignatureFull(
     const allowFile = path.join(tmpDir, `ssh_allow_${uniqueId}.txt`);
 
     try {
-        // Normalize SSH signature: Telegram wraps base64 lines at arbitrary
-        // widths which corrupts the sshsig armor. Re-format properly.
         const normalizedSig = normalizeSshSignature(signature);
-        console.log(`[SSH Verify] Normalized signature (first 200 chars): ${normalizedSig.slice(0, 200)}`);
-        console.log(`[SSH Verify] Signature length: ${normalizedSig.length}`);
-        console.log(`[SSH Verify] Hex dump (first 100 bytes): ${Buffer.from(normalizedSig).slice(0, 100).toString('hex')}`);
-        console.log(`[SSH Verify] Challenge: ${challenge}`);
-        console.log(`[SSH Verify] SSH key: ${sshKey.slice(0, 60)}...`);
 
         await fs.writeFile(sigFile, normalizedSig);
-        // Debug: save a copy for inspection
-        await fs.writeFile('/tmp/debug_ssh_sig.txt', normalizedSig);
         await fs.writeFile(pubFile, sshKey);
         await fs.writeFile(allowFile, `user ${sshKey}\n`);
 
@@ -314,18 +309,28 @@ async function verifySshSignatureFull(
             });
         });
 
-        console.log(`[SSH Verify] Exit code: ${result.code}, stdout: ${result.stdout}, stderr: ${result.stderr}`);
+        console.log(`[SSH Verify] exit=${result.code} stdout=${result.stdout.trim()} stderr=${result.stderr.trim()}`);
 
-        const goodSig = result.stdout.includes('Good signature') || result.stderr.includes('Good signature');
-        return { verified: goodSig };
+        // ssh-keygen -Y verify outputs: Good "file" signature for user with ...
+        // Check exit code first (most reliable), then check for "Good" in output
+        const combined = result.stdout + result.stderr;
+        const verified = result.code === 0 || /Good\s+"?\w+"?\s+signature/i.test(combined);
+
+        if (!verified) {
+            const errMsg = result.stderr.trim() || result.stdout.trim() || 'Verification failed';
+            return { verified: false, error: errMsg };
+        }
+
+        return { verified: true };
 
     } catch (error) {
         const e = error as Error & { stdout?: string; stderr?: string };
-        if (e.stdout?.includes('Good signature') || e.stderr?.includes('Good signature')) {
+        const combined = (e.stdout || '') + (e.stderr || '');
+        if (/Good\s+"?\w+"?\s+signature/i.test(combined)) {
             return { verified: true };
         }
         console.error(`[SSH Verify] Error: ${error}`);
-        return { verified: false, error: String(error) };
+        return { verified: false, error: (error as Error).message || String(error) };
     } finally {
         for (const f of [sigFile, pubFile, allowFile]) {
             try { await fs.unlink(f); } catch { }
@@ -334,18 +339,41 @@ async function verifySshSignatureFull(
 }
 
 /**
- * Normalize SSH signature armor to handle Telegram formatting.
- * Extracts the base64 body, strips all whitespace, and re-wraps at 70 chars.
+ * Normalize SSH signature armor to handle ALL Telegram formatting issues.
+ *
+ * Telegram applies multiple auto-formatting transformations:
+ * 1. Consecutive hyphens (---) → em dash (—) or en dash (–)
+ * 2. Various other Unicode dash characters
+ * 3. Zero-width characters inserted between words
+ * 4. Line wrapping at arbitrary widths in message bubbles
+ *
+ * This function:
+ * - Replaces ALL Unicode dash variants back to ASCII hyphens
+ * - Strips zero-width characters
+ * - Extracts the base64 body and re-wraps at 70 chars per line
  */
 function normalizeSshSignature(raw: string): string {
-    // CRITICAL: Telegram auto-typography replaces consecutive hyphens (---)
-    // with em dash (—, U+2014) and en dash (–, U+2013). This breaks the
-    // SSH signature armor header/footer. Replace them back to ASCII hyphens.
-    const sanitized = raw.trim()
+    // Step 1: Replace ALL Unicode dash/hyphen variants → ASCII hyphen
+    // Telegram can substitute any of these depending on platform/version
+    let sanitized = raw
         .replace(/\u2014/g, '--')   // em dash → two hyphens
-        .replace(/\u2013/g, '-');   // en dash → one hyphen
+        .replace(/\u2013/g, '-')    // en dash → hyphen
+        .replace(/\u2012/g, '-')    // figure dash
+        .replace(/\u2015/g, '-')    // horizontal bar
+        .replace(/\u2212/g, '-')    // minus sign
+        .replace(/\u2011/g, '-')    // non-breaking hyphen
+        .replace(/\uFE63/g, '-')    // small hyphen-minus
+        .replace(/\uFF0D/g, '-')    // fullwidth hyphen-minus
+        .replace(/\u2010/g, '-');   // hyphen (yes, there's a separate Unicode hyphen)
 
-    // Try to find header and footer anywhere in the text
+    // Step 2: Remove zero-width characters
+    sanitized = sanitized
+        .replace(/[\u200B\u200C\u200D\uFEFF]/g, '');
+
+    // Step 3: Trim
+    sanitized = sanitized.trim();
+
+    // Step 4: Find header and footer
     const headerMatch = sanitized.match(/-----BEGIN SSH SIGNATURE-----/);
     const footerMatch = sanitized.match(/-----END SSH SIGNATURE-----/);
 
@@ -357,10 +385,10 @@ function normalizeSshSignature(raw: string): string {
     const headerEnd = sanitized.indexOf('-----BEGIN SSH SIGNATURE-----') + '-----BEGIN SSH SIGNATURE-----'.length;
     const footerStart = sanitized.indexOf('-----END SSH SIGNATURE-----');
 
-    // Extract everything between header and footer, strip ALL whitespace
+    // Step 5: Extract base64 body, strip ALL whitespace
     const base64Body = sanitized.slice(headerEnd, footerStart).replace(/\s+/g, '');
 
-    // Re-wrap at 70 chars per line
+    // Step 6: Re-wrap at 70 chars per line (standard PEM/sshsig format)
     const wrappedLines: string[] = [];
     for (let i = 0; i < base64Body.length; i += 70) {
         wrappedLines.push(base64Body.slice(i, i + 70));
