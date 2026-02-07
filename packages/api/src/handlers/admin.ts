@@ -3,6 +3,7 @@ import { verify } from 'hono/jwt';
 import { makeResponse, ResponseCode, success } from '../common/response';
 import { getModels, getSequelize } from '../db/dbContext';
 import { getRedis } from '../db/redisContext';
+import { getEmailProvider } from '../providers/email';
 import config from '../config';
 import { PeeringStatus, SessionPolicy } from '../db/models/bgpSessions';
 import { Op } from 'sequelize';
@@ -113,6 +114,8 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await unblockAsn(c, body);
         case 'enumBlocklist':
             return await enumBlocklist(c);
+        case 'sendEmail':
+            return await sendVerificationEmail(c, body);
         default:
             return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
     }
@@ -849,6 +852,28 @@ async function getBlocklistData(): Promise<BlockedEntry[]> {
     } catch {
         return [];
     }
+}
+
+/**
+ * Send a verification email via Mailgun
+ */
+async function sendVerificationEmail(c: Context, body: { email?: string; asn?: number; code?: string }): Promise<Response> {
+    const { email, asn, code } = body;
+    if (!email || !asn || !code) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing email, asn, or code');
+    }
+
+    const emailProvider = getEmailProvider();
+    if (!emailProvider.isEnabled()) {
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Email service not configured');
+    }
+
+    const result = await emailProvider.sendVerificationCode(email, asn, code);
+    if (!result.success) {
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, result.error || 'Failed to send email');
+    }
+
+    return success(c, { message: 'Verification email sent' });
 }
 
 /**

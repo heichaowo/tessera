@@ -53,6 +53,7 @@ interface ChallengeData {
     method: 'gpg' | 'ssh' | 'email';
     gpgFp?: string;
     sshKey?: string;
+    email?: string;
 }
 
 // Store for verification challenges
@@ -62,12 +63,16 @@ const challengeStore = new Map<number, ChallengeData>();
 // API Client
 // =============================================================================
 
-async function apiRequest(endpoint: string, method = 'POST', body?: unknown): Promise<APIResponse> {
+async function apiRequest(endpoint: string, method = 'POST', body?: unknown, token?: string): Promise<APIResponse> {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+    };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
     const response = await fetch(`${config.apiUrl}${endpoint}`, {
         method,
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers,
         body: body ? JSON.stringify(body) : undefined,
     });
     return response.json() as Promise<APIResponse>;
@@ -451,6 +456,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                 method: 'email', // default
                 gpgFp: gpgFingerprints[0],
                 sshKey: sshKeys[0],
+                email: emails[0],
             });
 
             await ctx.reply(
@@ -563,6 +569,20 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         const userId = ctx.from.id;
 
         const stored = challengeStore.get(userId);
+        const email = stored?.email;
+
+        if (!email) {
+            await ctx.answerCallbackQuery();
+            await ctx.editMessageText(
+                `📧 *Email Login*\n\n` +
+                `${ICONS.error} No email address found for AS${asn}.\n` +
+                `未找到 AS${asn} 的邮箱地址。\n\n` +
+                `Please use GPG or SSH authentication instead.\n` +
+                `请使用 GPG 或 SSH 认证。`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
 
         // Generate 6-digit code
         const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -573,19 +593,60 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             mntBy: stored?.mntBy || `AS${asn}-MNT`,
             challenge: code,
             method: 'email',
+            email,
         });
 
-        // Email login not yet implemented (no email service configured)
         await ctx.answerCallbackQuery();
-        await ctx.editMessageText(
-            `📧 *Email Login*\n\n` +
-            `⚠️ Email verification is not yet available.\n` +
-            `邮箱验证暂不可用。\n\n` +
-            `Please use GPG or SSH authentication instead.\n` +
-            `请使用 GPG 或 SSH 认证。`,
-            { parse_mode: 'Markdown' }
-        );
-        challengeStore.delete(userId);
+
+        try {
+            // Send verification email via admin API (Mailgun)
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'sendEmail',
+                email,
+                asn,
+                code,
+            }, config.apiToken);
+
+            if (result.code !== 0) {
+                await ctx.editMessageText(
+                    `📧 *Email Login*\n\n` +
+                    `${ICONS.error} Failed to send verification email.\n` +
+                    `发送验证邮件失败。\n\n` +
+                    `Error: ${result.message}\n\n` +
+                    `Please use GPG or SSH authentication instead.\n` +
+                    `请使用 GPG 或 SSH 认证。`,
+                    { parse_mode: 'Markdown' }
+                );
+                challengeStore.delete(userId);
+                return;
+            }
+
+            // Mask email for display
+            const maskedEmail = email.replace(/^(.{2})(.*)(@.*)$/, '$1***$3');
+
+            await ctx.editMessageText(
+                `📧 *Email Login*\n\n` +
+                `✉️ Verification code has been sent to:\n` +
+                `验证码已发送至：\n` +
+                `\`${maskedEmail}\`\n\n` +
+                `Please enter the 6-digit code.\n` +
+                `请输入 6 位验证码。\n\n` +
+                `The code will expire in 10 minutes.\n` +
+                `验证码将在 10 分钟后过期。\n\n` +
+                `Use /cancel to interrupt.\n` +
+                `使用 /cancel 终止操作。`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('[Login] Email send error:', error);
+            await ctx.editMessageText(
+                `📧 *Email Login*\n\n` +
+                `${ICONS.error} Failed to send verification email.\n` +
+                `发送验证邮件失败。`,
+                { parse_mode: 'Markdown' }
+            );
+            challengeStore.delete(userId);
+        }
     });
 
     // Handle signature/code verification
