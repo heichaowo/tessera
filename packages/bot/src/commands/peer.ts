@@ -2099,11 +2099,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 // Build node keyboard dynamically
                 try {
                     const nodeResult = await apiRequest('/admin', 'POST', { action: 'enumRouters' }, config.apiToken);
-                    const nodes = nodeResult.data?.nodes;
+                    const nodes = nodeResult.data?.routers;
                     if (nodeResult.code === 0 && Array.isArray(nodes)) {
                         keyboard = new InlineKeyboard();
                         for (const node of nodes) {
-                            if (node.status === 1) { // Only active nodes
+                            if (node.isOpen) { // Only open nodes
                                 keyboard.text(`📍 ${node.name}`, `modify:region:${uuid}:${node.uuid}`).row();
                             }
                         }
