@@ -608,7 +608,7 @@ async function createSessionAdmin(c: Context, body: {
 
     const sessionUuid = generateUUID();
     const interfaceName = getInterfaceName(asn);
-    const sessionStatus = status === 1 ? PeeringStatus.ENABLED : PeeringStatus.PENDING_REVIEW;
+    const sessionStatus = status === 1 ? PeeringStatus.QUEUED_FOR_SETUP : PeeringStatus.PENDING_REVIEW;
 
     try {
         await models.bgpSessions.create({
@@ -625,7 +625,7 @@ async function createSessionAdmin(c: Context, body: {
             extensions: null,
             interface: interfaceName,
             endpoint: endpoint || null,
-            credential: publicKey ? JSON.stringify({ pubkey: publicKey, psk: psk || null }) : null,
+            credential: publicKey || null,
             data: null,
             lastError: null,
         });
