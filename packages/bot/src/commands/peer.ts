@@ -295,7 +295,25 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        switch (flow.step) {
+        // Guard: intercept abort/finish buttons in modify sub-steps
+        // (modify_menu and modify_confirm handle these themselves)
+        if (flow.step?.startsWith('modify_') && flow.step !== 'modify_menu' && flow.step !== 'modify_confirm') {
+            if (isAbortButton(text) || text === '/cancel') {
+                ctx.session.peerFlow = undefined;
+                await ctx.reply(
+                    'Abort modification, operation has been canceled.\n放弃修改，操作已取消。',
+                    { reply_markup: { remove_keyboard: true } }
+                );
+                return;
+            }
+            if (isFinishButton(text)) {
+                // Redirect to modify_menu's finish handler
+                ctx.session.peerFlow = { ...flow, step: 'modify_menu' };
+                // Fall through to switch — modify_menu will handle finish
+            }
+        }
+
+        switch (ctx.session.peerFlow?.step || flow.step) {
             // ===== Creation wizard ReplyKeyboard handlers =====
             case 'select_node': {
                 // Skip admin mode - handled by admin.ts
