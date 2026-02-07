@@ -258,8 +258,32 @@ async function verifySshSignatureFull(
     const allowFile = path.join(tmpDir, `ssh_allow_${uniqueId}.txt`);
 
     try {
-        // Normalize signature: trim, fix line endings, ensure trailing newline
-        const normalizedSig = signature.trim().replace(/\r\n/g, '\n') + '\n';
+        // Normalize SSH signature: Telegram wraps base64 lines at arbitrary
+        // widths which corrupts the sshsig armor. Re-format properly:
+        // 1. Extract header/footer
+        // 2. Strip all whitespace from base64 body
+        // 3. Re-wrap at 70 chars per line
+        const lines = signature.trim().replace(/\r\n/g, '\n').split('\n').map(l => l.trim());
+        const headerIdx = lines.findIndex(l => l === '-----BEGIN SSH SIGNATURE-----');
+        const footerIdx = lines.findIndex(l => l === '-----END SSH SIGNATURE-----');
+
+        let normalizedSig: string;
+        if (headerIdx !== -1 && footerIdx !== -1 && footerIdx > headerIdx) {
+            const base64Body = lines.slice(headerIdx + 1, footerIdx).join('').replace(/\s/g, '');
+            const wrappedLines: string[] = [];
+            for (let i = 0; i < base64Body.length; i += 70) {
+                wrappedLines.push(base64Body.slice(i, i + 70));
+            }
+            normalizedSig = [
+                '-----BEGIN SSH SIGNATURE-----',
+                ...wrappedLines,
+                '-----END SSH SIGNATURE-----',
+                '',
+            ].join('\n');
+        } else {
+            normalizedSig = signature.trim() + '\n';
+        }
+
         await fs.writeFile(sigFile, normalizedSig);
         await fs.writeFile(pubFile, sshKey);
         await fs.writeFile(allowFile, `user ${sshKey}\n`);
