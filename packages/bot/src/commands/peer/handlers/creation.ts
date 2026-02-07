@@ -52,7 +52,7 @@ export function registerCreationHandlers(bot: Bot<BotContext>) {
             ...flow,
             step: 'await_continue',
             routerName: nodeName,
-            routerUuid: nodeInfo.uuid,
+            sessionUuid: nodeInfo.uuid,
             serverEndpoint: `${nodeName}.dn42.moenet.work`,
             serverPort: userPort,
             serverPubkey: nodeInfo.pubkey,

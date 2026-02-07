@@ -26,7 +26,7 @@ export function registerRemoveHandlers(bot: Bot<BotContext>) {
         // Set session step for hybrid confirmation (text "yes" fallback)
         ctx.session.peerFlow = {
             step: 'remove_confirm',
-            routerUuid: uuid,
+            sessionUuid: uuid,
         };
 
         const keyboard = new InlineKeyboard()

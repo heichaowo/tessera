@@ -7,7 +7,7 @@
 import type { Bot } from 'grammy';
 import type { BotContext } from '../../../index';
 import config from '../../../config';
-import { apiRequest } from '../api';
+import { apiRequest, submitModifyChanges } from '../api';
 
 /**
  * Show modify menu helper type - will be passed from peer.ts
@@ -52,11 +52,8 @@ export function registerModifyHandlers(
      */
     bot.callbackQuery('modify:submit', async (ctx) => {
         const flow = ctx.session.peerFlow;
-        const uuid = flow?.routerUuid;
-        const current = flow?.current;
-        const backup = flow?.backup;
 
-        if (!uuid || !current || !backup) {
+        if (!flow?.sessionUuid || !flow?.current || !flow?.backup) {
             ctx.session.peerFlow = undefined;
             await ctx.answerCallbackQuery('Error: No session data');
             await ctx.editMessageText('❌ Error: No session data');
@@ -67,72 +64,19 @@ export function registerModifyHandlers(
         await ctx.editMessageText('⏳ Submitting changes...\n正在提交更改...');
 
         try {
-            // Build request with only changed fields
-            const requestBody: Record<string, unknown> = {
-                action: 'updateSession',
-                uuid,
-            };
+            const result = await submitModifyChanges(flow);
 
-            if (current.ipv6 !== backup.ipv6) {
-                requestBody.ipv6 = current.ipv6 || null;
-            }
-            if (current.ipv4 !== backup.ipv4) {
-                requestBody.ipv4 = current.ipv4 || null;
-            }
-            if (current.localIpv6 !== backup.localIpv6) {
-                requestBody.ipv6LinkLocal = current.localIpv6 || null;
-            }
-            if (current.localIpv4 !== backup.localIpv4) {
-                requestBody.localIpv4 = current.localIpv4 || null;
-            }
-            if (current.endpoint !== backup.endpoint || current.port !== backup.port) {
-                const fullEndpoint = current.endpoint
-                    ? (current.port ? `${current.endpoint}:${current.port}` : current.endpoint)
-                    : null;
-                requestBody.endpoint = fullEndpoint;
-            }
-            if (current.mtu !== backup.mtu) {
-                requestBody.mtu = current.mtu;
-            }
-            if (current.contact !== backup.contact) {
-                requestBody.contact = current.contact || null;
-            }
-            if (current.mpbgp !== backup.mpbgp || current.extendedNexthop !== backup.extendedNexthop) {
-                requestBody.extensions = (current.mpbgp ? 'mp_bgp' : '') + (current.extendedNexthop ? ',extended_nexthop' : '');
+            if (!result.success) {
+                await ctx.reply(`❌ ${result.message}`);
+                ctx.session.peerFlow = undefined;
+                return;
             }
 
-            // Submit field changes first (if any)
-            const hasFieldChanges = Object.keys(requestBody).length > 2;
-            if (hasFieldChanges) {
-                console.log('[modify:submit] Request body:', JSON.stringify(requestBody));
-                const result = await apiRequest('/admin', 'POST', requestBody, config.apiToken);
-                console.log('[modify:submit] Response:', JSON.stringify(result));
-
-                if (result.code !== 0) {
-                    await ctx.reply(`❌ Failed to update: ${result.message}`);
-                    ctx.session.peerFlow = undefined;
-                    return;
-                }
-            }
-
-            // Execute pending migration if set
-            if (flow.pendingMigration) {
-                const migrateResult = await apiRequest('/admin', 'POST', {
-                    action: 'migrate',
-                    uuid,
-                    newRouter: flow.pendingMigration.nodeUuid,
-                }, config.apiToken);
-
-                if (migrateResult.code !== 0) {
-                    await ctx.reply(`❌ Migration failed: ${migrateResult.message}`);
-                    ctx.session.peerFlow = undefined;
-                    return;
-                }
-
+            if (result.migrated) {
                 await ctx.reply(
                     `✅ *Changes submitted & migration initiated!*\n` +
                     `修改已提交，迁移已启动！\n\n` +
-                    `From: \`${flow.routerName}\` → To: \`${flow.pendingMigration.nodeName}\`\n\n` +
+                    `From: \`${flow.routerName}\` → To: \`${flow.pendingMigration!.nodeName}\`\n\n` +
                     `Peer will be automatically recreated on the new node.\n` +
                     `Peer 将在新节点上自动重建。\n\n` +
                     `⏳ Please wait a few minutes for changes to apply.\n` +

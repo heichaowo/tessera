@@ -18,7 +18,7 @@ interface SessionData {
         isAdminMode?: boolean;
         targetAsn?: number;
         routerName?: string;
-        routerUuid?: string;
+        sessionUuid?: string;
         serverEndpoint?: string;
         serverPort?: number;
         serverPubkey?: string;

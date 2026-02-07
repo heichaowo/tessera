@@ -436,7 +436,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             ...flow,
             step: 'await_continue',
             routerName: nodeInfo.name || text.split(' | ')[1] || text,
-            routerUuid: nodeInfo.uuid,
+            sessionUuid: nodeInfo.uuid,
             serverEndpoint: nodeInfo.endpoint,
             serverPort: userPort,
             serverPubkey: nodeInfo.pubkey,

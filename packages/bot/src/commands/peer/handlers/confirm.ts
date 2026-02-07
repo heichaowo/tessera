@@ -30,7 +30,7 @@ export function registerConfirmHandlers(bot: Bot<BotContext>) {
             const result = await apiRequest('/admin', 'POST', {
                 action,
                 asn,
-                router: flow.routerUuid,
+                router: flow.sessionUuid,
                 ipv6: flow.ipv6,
                 endpoint: flow.endpoint && flow.port ? `${flow.endpoint}:${flow.port}` : undefined,
                 publicKey: flow.publicKey,

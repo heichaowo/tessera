@@ -47,6 +47,8 @@ import {
     registerConfirmHandlers,
     registerModifyHandlers,
     registerRemoveHandlers,
+    // API
+    submitModifyChanges,
 } from './peer/index';
 
 /**
@@ -263,7 +265,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 ctx.session.peerFlow = {
                     step: 'show_wg_info',
                     routerName: nodeInfo.name,
-                    routerUuid: nodeInfo.uuid,
+                    sessionUuid: nodeInfo.uuid,
                     serverEndpoint: nodeInfo.endpoint,
                     serverPort: userPort,
                     serverPubkey: nodeInfo.pubkey,
@@ -379,7 +381,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     ...flow,
                     step: 'await_continue',
                     routerName: nodeInfo.name || text.split(' (')[0] || text,
-                    routerUuid: nodeInfo.uuid,
+                    sessionUuid: nodeInfo.uuid,
                     serverEndpoint: nodeInfo.endpoint,
                     serverPort: userPort,
                     serverPubkey: nodeInfo.pubkey,
@@ -510,7 +512,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
             // ===== Modify menu handlers (dn42-bot style) =====
             case 'modify_menu': {
-                const uuid = flow.routerUuid;
+                const uuid = flow.sessionUuid;
                 if (!uuid) {
                     ctx.session.peerFlow = undefined;
                     return;
@@ -708,7 +710,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                             if (nodeResult.code === 0 && Array.isArray(nodes)) {
                                 const nodeButtons: { text: string }[][] = [];
                                 for (const node of nodes) {
-                                    if (node.isOpen !== false && node.uuid !== flow.routerUuid) {
+                                    if (node.isOpen !== false && node.uuid !== flow.sessionUuid) {
                                         nodeButtons.push([{ text: `📍 ${node.name} (${node.location || 'Unknown'})` }]);
                                     }
                                 }
@@ -867,85 +869,26 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 }
 
                 // Submit all changes to API
-                const uuid = flow.routerUuid;
-                const current = flow.current;
-                if (!uuid || !current) {
+                if (!flow.sessionUuid || !flow.current) {
                     ctx.session.peerFlow = undefined;
                     await ctx.reply('❌ Error: No session data');
                     return;
                 }
 
                 try {
-                    const backup = flow.backup;
+                    const result = await submitModifyChanges(flow);
 
-                    // Only include fields that actually changed
-                    const requestBody: Record<string, unknown> = {
-                        action: 'updateSession',
-                        uuid,
-                    };
-
-                    // Compare and add only changed fields
-                    if (current.ipv6 !== backup?.ipv6) {
-                        requestBody.ipv6 = current.ipv6 || null;
-                    }
-                    if (current.ipv4 !== backup?.ipv4) {
-                        requestBody.ipv4 = current.ipv4 || null;
-                    }
-                    if (current.localIpv6 !== backup?.localIpv6) {
-                        requestBody.ipv6LinkLocal = current.localIpv6 || null;
-                    }
-                    if (current.localIpv4 !== backup?.localIpv4) {
-                        requestBody.localIpv4 = current.localIpv4 || null;
-                    }
-                    if (current.endpoint !== backup?.endpoint || current.port !== backup?.port) {
-                        const fullEndpoint = current.endpoint
-                            ? (current.port ? `${current.endpoint}:${current.port}` : current.endpoint)
-                            : null;
-                        requestBody.endpoint = fullEndpoint;
-                    }
-                    if (current.mtu !== backup?.mtu) {
-                        requestBody.mtu = current.mtu;
-                    }
-                    if (current.contact !== backup?.contact) {
-                        requestBody.contact = current.contact || null;
+                    if (!result.success) {
+                        await ctx.reply(`❌ ${result.message}`);
+                        ctx.session.peerFlow = undefined;
+                        return;
                     }
 
-                    // Build extensions string only if session type changed
-                    if (current.mpbgp !== backup?.mpbgp || current.extendedNexthop !== backup?.extendedNexthop) {
-                        requestBody.extensions = (current.mpbgp ? 'mp_bgp' : '') + (current.extendedNexthop ? ',extended_nexthop' : '');
-                    }
-                    // Submit field changes first (if any)
-                    const hasFieldChanges = Object.keys(requestBody).length > 2; // more than action + uuid
-                    if (hasFieldChanges) {
-                        console.log('[modify_confirm] Request body:', JSON.stringify(requestBody));
-                        const result = await apiRequest('/admin', 'POST', requestBody, config.apiToken);
-                        console.log('[modify_confirm] Response:', JSON.stringify(result));
-
-                        if (result.code !== 0) {
-                            await ctx.reply(`❌ Failed to update: ${result.message}`);
-                            ctx.session.peerFlow = undefined;
-                            return;
-                        }
-                    }
-
-                    // Execute pending migration if set
-                    if (flow.pendingMigration) {
-                        const migrateResult = await apiRequest('/admin', 'POST', {
-                            action: 'migrate',
-                            uuid,
-                            newRouter: flow.pendingMigration.nodeUuid,
-                        }, config.apiToken);
-
-                        if (migrateResult.code !== 0) {
-                            await ctx.reply(`❌ Migration failed: ${migrateResult.message}`);
-                            ctx.session.peerFlow = undefined;
-                            return;
-                        }
-
+                    if (result.migrated) {
                         await ctx.reply(
-                            `✅ *Changes submitted & migration initiated!*\n` +
+                            `✅ *Changes submitted \& migration initiated!*\n` +
                             `修改已提交，迁移已启动！\n\n` +
-                            `From: \`${flow.routerName}\` → To: \`${flow.pendingMigration.nodeName}\`\n\n` +
+                            `From: \`${flow.routerName}\` → To: \`${flow.pendingMigration!.nodeName}\`\n\n` +
                             `Peer will be automatically recreated on the new node.\n` +
                             `Peer 将在新节点上自动重建。\n\n` +
                             `⏳ Please wait a few minutes for changes to apply.\n` +
@@ -1406,7 +1349,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         const result = await apiRequest('/admin', 'POST', {
                             action,
                             asn,
-                            router: flow.routerUuid,
+                            router: flow.sessionUuid,
                             ipv6: flow.ipv6,
                             endpoint: flow.endpoint && flow.port ? `${flow.endpoint}:${flow.port}` : undefined,
                             publicKey: flow.publicKey,
@@ -1490,7 +1433,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 try {
                     const result = await apiRequest('/admin', 'POST', {
                         action: 'updateSession',
-                        uuid: flow.routerUuid,
+                        uuid: flow.sessionUuid,
                         ipv6,
                     }, config.apiToken);
 
@@ -1708,7 +1651,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             // Remove confirmation: hybrid (InlineKeyboard + text "yes")
             case 'remove_confirm': {
                 if (text.toLowerCase() === 'yes') {
-                    const uuid = flow.routerUuid;
+                    const uuid = flow.sessionUuid;
                     if (!uuid) {
                         ctx.session.peerFlow = undefined;
                         await ctx.reply('❌ Error: No session to remove');
@@ -2018,7 +1961,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             // Store backup state for diff tracking (dn42-bot style)
             ctx.session.peerFlow = {
                 step: 'modify_menu',
-                routerUuid: uuid,
+                sessionUuid: uuid,
                 routerName: session.routerName || session.router,
                 asn: session.asn,
                 backup: {
@@ -2133,7 +2076,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
         // Store modify state in peerFlow
         ctx.session.peerFlow = {
             step: `modify_${field}`,
-            routerUuid: uuid,
+            sessionUuid: uuid,
         };
 
         let promptText = '';
