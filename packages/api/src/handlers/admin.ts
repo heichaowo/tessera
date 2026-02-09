@@ -674,7 +674,7 @@ async function createSessionAdmin(c: Context, body: {
             // Auto-set our local LLA for link-local peering
             ipv6LinkLocal: ipv6 && ipv6.startsWith('fe80') ? 'fe80::998' : null,
             type: 'wireguard',
-            extensions: (sessionExtensions.length > 0 ? sessionExtensions : null) as unknown as string,
+            extensions: sessionExtensions.length > 0 ? JSON.stringify(sessionExtensions) : null,
             interface: interfaceName,
             endpoint: fullEndpoint,
             credential: publicKey ? JSON.stringify({
