@@ -302,6 +302,18 @@ async function handleModify(c: Context, router: string): Promise<Response> {
 
     const models = getModels();
 
+    // If agent reports deletion complete (status=0), destroy the session row
+    if (status === 0) {
+        const deleted = await models.bgpSessions.destroy({
+            where: { uuid, router },
+        });
+        if (!deleted) {
+            return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
+        }
+        console.log(`[handleModify] Destroyed session ${uuid} (agent reported deletion complete)`);
+        return success(c, { deleted: true });
+    }
+
     const [updated] = await models.bgpSessions.update(
         {
             status: status as PeeringStatus,
