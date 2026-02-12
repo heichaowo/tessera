@@ -138,6 +138,34 @@ async function showModifyMenu(ctx: BotContext, isFirstTime = false) {
     );
 }
 
+
+/**
+ * Show BGP Address sub-menu with ReplyKeyboard
+ * Called when user presses Back from a specific BGP address field edit
+ */
+async function showBgpAddressMenu(ctx: BotContext, flow: NonNullable<BotContext['session']['peerFlow']>) {
+    await ctx.reply(
+        '🌐 *BGP Address*\n\n' +
+        `Current:\n` +
+        `• Peer IPv6: \`${flow.current?.ipv6 || 'Not set'}\`\n` +
+        `• Peer IPv4: \`${flow.current?.ipv4 || 'Not set'}\`\n` +
+        `• Local IPv6: \`${flow.current?.localIpv6 || 'Not set'}\`\n` +
+        `• Local IPv4: \`${flow.current?.localIpv4 || 'Not set'}\`\n\n` +
+        'Select which to modify:\n选择要修改的项:',
+        {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                keyboard: [
+                    [{ text: 'Peer IPv6 (对方)' }, { text: 'Peer IPv4 (对方)' }],
+                    [{ text: 'Local IPv6 (我方)' }, { text: 'Local IPv4 (我方)' }],
+                    [{ text: '🔙 Back' }],
+                ],
+                resize_keyboard: true,
+            }
+        }
+    );
+}
+
 export function registerPeerCommands(bot: Bot<BotContext>) {
 
     // Register handlers from extracted modules
@@ -1424,6 +1452,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
             // Modify handlers
             case 'modify_ipv6': {
+                if (isBackButton(text)) {
+                    await showModifyMenu(ctx);
+                    return;
+                }
                 const ipv6 = text.includes('/') ? text.split('/')[0] : text;
                 if (!isValidIPv6(ipv6 || '')) {
                     await ctx.reply('❌ Invalid IPv6 address. Please try again.');
@@ -1450,6 +1482,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'modify_endpoint': {
+                if (isBackButton(text)) {
+                    await showModifyMenu(ctx);
+                    return;
+                }
                 const current = flow.current;
                 if (!current) {
                     await showModifyMenu(ctx);
@@ -1489,6 +1525,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'modify_pubkey': {
+                if (isBackButton(text)) {
+                    await showModifyMenu(ctx);
+                    return;
+                }
                 if (!isValidWgPubkey(text)) {
                     await ctx.reply('❌ Invalid public key. Should be 44 chars ending with =');
                     return;
@@ -1541,6 +1581,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
             // New field handlers
             case 'modify_peerIpv6': {
+                if (isBackButton(text)) {
+                    ctx.session.peerFlow = { ...flow, step: 'modify_bgp_address' };
+                    await showBgpAddressMenu(ctx, flow);
+                    return;
+                }
                 // Validate IPv6 format
                 const ipv6 = text.trim();
                 if (!/^(fe80:|fd[0-9a-f]{2}:|fc[0-9a-f]{2}:)/i.test(ipv6)) {
@@ -1563,6 +1608,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'modify_peerIpv4': {
+                if (isBackButton(text)) {
+                    ctx.session.peerFlow = { ...flow, step: 'modify_bgp_address' };
+                    await showBgpAddressMenu(ctx, flow);
+                    return;
+                }
                 const ipv4 = text.trim().toLowerCase();
                 if (ipv4 !== 'none' && !/^172\.(2[0-3]|1[6-9])\./.test(ipv4)) {
                     await ctx.reply('❌ Invalid DN42 IPv4. Use 172.20.x.x - 172.23.x.x or "none"');
@@ -1585,6 +1635,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'modify_localIpv6': {
+                if (isBackButton(text)) {
+                    ctx.session.peerFlow = { ...flow, step: 'modify_bgp_address' };
+                    await showBgpAddressMenu(ctx, flow);
+                    return;
+                }
                 const ipv6 = text.trim();
                 if (!/^(fe80:|fd[0-9a-f]{2}:|fc[0-9a-f]{2}:)/i.test(ipv6)) {
                     await ctx.reply('❌ Invalid IPv6. Use Link-Local (fe80::) or ULA (fd00::/fc00::)');
@@ -1606,6 +1661,11 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'modify_localIpv4': {
+                if (isBackButton(text)) {
+                    ctx.session.peerFlow = { ...flow, step: 'modify_bgp_address' };
+                    await showBgpAddressMenu(ctx, flow);
+                    return;
+                }
                 const ipv4 = text.trim().toLowerCase();
                 if (ipv4 !== 'none' && !/^172\.(2[0-3]|1[6-9])\./.test(ipv4)) {
                     await ctx.reply('❌ Invalid DN42 IPv4. Use 172.20.x.x - 172.23.x.x or "none"');
@@ -1628,6 +1688,10 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             case 'modify_contact': {
+                if (isBackButton(text)) {
+                    await showModifyMenu(ctx);
+                    return;
+                }
                 const contact = text.trim();
                 if (contact.length < 3 || contact.length > 200) {
                     await ctx.reply('❌ Contact must be 3-200 characters');
