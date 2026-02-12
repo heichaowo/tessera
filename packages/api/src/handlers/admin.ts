@@ -768,12 +768,19 @@ async function migrateSession(c: Context, body: {
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'New router is the same as current router');
     }
 
-    // Check if session already exists on target router
+    // Check if session already exists on target router (ignore deleted ones)
     const existing = await models.bgpSessions.findOne({
         where: { router: newRouter, asn },
     });
     if (existing) {
-        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Session already exists on target router');
+        const existingStatus = existing.get('status') as number;
+        if (existingStatus === 0) { // status 0 = deleted/soft-deleted
+            // Clean up old deleted session so migration can proceed
+            await existing.destroy();
+            console.log(`[Admin] Cleaned up deleted session for AS${asn} on target router`);
+        } else {
+            return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Session already exists on target router');
+        }
     }
 
     const sequelize = getSequelize();
