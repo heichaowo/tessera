@@ -242,6 +242,14 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
 
     const bgpSessions = sessions.map((session: { get: () => unknown }) => {
         const s = session.get() as BgpSessionAttributes;
+        // Extract listen_port from credential JSON for firewall sync
+        let port = 0;
+        if (s.credential) {
+            try {
+                const cred = typeof s.credential === 'string' ? JSON.parse(s.credential) : s.credential;
+                if (cred?.listen_port) port = cred.listen_port;
+            } catch { /* ignore parse errors */ }
+        }
         return {
             uuid: s.uuid,
             asn: parseInt(String(s.asn), 10),  // Convert to number for Go agent
@@ -256,6 +264,7 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
             credential: typeof s.credential === 'string' ? s.credential : (s.credential ? JSON.stringify(s.credential) : ''),
             data: typeof s.data === 'string' ? JSON.parse(s.data) : (s.data || null),
             mtu: s.mtu,
+            port,
             policy: s.policy,
             lastError: s.lastError,
         };
