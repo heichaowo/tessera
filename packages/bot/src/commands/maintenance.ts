@@ -163,7 +163,7 @@ export function registerMaintenanceCommands(bot: Bot<BotContext>) {
  */
 async function showMaintenancePanel(ctx: BotContext, editMessageId?: number) {
     const nodesMap = await getNodes();
-    const nodes = Array.from(nodesMap.values());
+    const nodes = Array.from(nodesMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 
     if (nodes.length === 0) {
         const msg = '❌ No nodes available';

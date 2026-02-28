@@ -219,7 +219,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             const nodeMap: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number; name: string }> = {};
             const couldPeer: string[] = [];
 
-            for (const r of routers) {
+            for (const r of routers.sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))) {
                 // Build label: NAME | City | Provider (same as /addpeer)
                 const nodeName = r.name.toUpperCase();
                 const city = r.location || '';
@@ -737,7 +737,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                             const nodes = nodeResult.data?.routers;
                             if (nodeResult.code === 0 && Array.isArray(nodes)) {
                                 const nodeButtons: { text: string }[][] = [];
-                                for (const node of nodes) {
+                                for (const node of [...nodes].sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))) {
                                     if (node.isOpen !== false && node.uuid !== flow.sessionUuid) {
                                         nodeButtons.push([{ text: `📍 ${node.name} (${node.location || 'Unknown'})` }]);
                                     }

@@ -315,7 +315,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             const nodeMap: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number; name: string }> = {};
             const couldPeer: string[] = [];
 
-            for (const r of routers) {
+            for (const r of routers.sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))) {
                 // Build label: NAME | City | Provider
                 const nodeName = r.name.toUpperCase();
                 const city = r.location || '';
