@@ -185,15 +185,16 @@ async function buildNodeKeyboard(command: string, target: string, currentNode = 
     const keyboard = new InlineKeyboard();
     const nodes = await getNodes();
 
-    // Hide 'All' button for trace (too slow for all nodes)
-    if (command !== 'trace') {
+    // Hide 'All' button for trace and lg (too slow/verbose for all nodes)
+    const hideAll = command === 'trace' || command === 'lg';
+    if (!hideAll) {
         const allLabel = currentNode === 'all' ? '✅ 全部' : '全部';
         keyboard.text(allLabel, `tool:${command}:${target}:all`);
     }
 
     // Node buttons - sorted alphabetically by nodeId for consistent ordering
     const sortedEntries = Array.from(nodes.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    let count = command !== 'trace' ? 1 : 0;
+    let count = hideAll ? 0 : 1;
     for (const [nodeId, node] of sortedEntries) {
         const displayName = node.location ? `${nodeId} ${node.location}` : nodeId;
         const label = currentNode === nodeId ? `✅ ${displayName}` : displayName;
@@ -365,19 +366,29 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
     });
 
     /**
-     * /lg <target> - Looking glass (combined route + AS path)
+     * /lg <target> - Looking glass (combined route + AS path on single node)
      */
     bot.command('lg', async (ctx) => {
         const args = ctx.match?.trim().split(/\s+/) || [];
         const target = args[0];
-        const node = args[1] || 'all';
+        const node = args[1];
 
         if (!target) {
             await ctx.reply('用法: /lg <IP/CIDR> [节点]\n例如: /lg 172.22.188.0/27\n\n综合查询：路由 + AS 路径');
             return;
         }
 
-        // Run route and path queries in parallel
+        if (!node) {
+            // Show node selection first (lg is too heavy for all nodes)
+            const keyboard = await buildNodeKeyboard('lg', target);
+            await ctx.reply(`🔍 Select a node to query \`${target}\`:`, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard,
+            });
+            return;
+        }
+
+        // Run route and path queries in parallel on the selected node
         const [routeResult, pathResult] = await Promise.all([
             executeOnAgent('route', target, node),
             executeOnAgent('path', target, node),
