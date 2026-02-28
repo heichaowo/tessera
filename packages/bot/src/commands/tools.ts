@@ -22,19 +22,23 @@ async function executeOnAgent(
         return await runLocalCommand(command, target);
     }
 
-    const results: string[] = [];
+    // Run requests in parallel with per-request timeout to avoid webhook timeout
+    const PER_REQUEST_TIMEOUT = 15_000; // 15s per agent request
+    const OVERALL_TIMEOUT = 25_000; // 25s overall to stay within Telegram webhook limits
 
-    for (const id of nodeIds) {
+    const promises = nodeIds.map(async (id): Promise<string | null> => {
         const node = nodes.get(id);
-        if (!node) continue;
+        if (!node) return null;
 
         const endpoint = await getAgentEndpoint(id);
         if (!endpoint) {
-            results.push(`❌ ${id}: No agent endpoint`);
-            continue;
+            return `❌ ${id}: No agent endpoint`;
         }
 
         try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), PER_REQUEST_TIMEOUT);
+
             const response = await fetch(`${endpoint}/${command}`, {
                 method: 'POST',
                 headers: {
@@ -42,17 +46,41 @@ async function executeOnAgent(
                     'Authorization': `Bearer ${config.agentToken || ''}`,
                 },
                 body: JSON.stringify({ target }),
+                signal: controller.signal,
             });
+
+            clearTimeout(timeout);
 
             if (response.ok) {
                 const data = await response.json() as { result?: string };
                 const nodeName = node.location || id;
-                results.push(`📍 *${nodeName}*\n\`\`\`\n${data.result || 'No output'}\n\`\`\``);
+                return `📍 *${nodeName}*\n\`\`\`\n${data.result || 'No output'}\n\`\`\``;
             } else {
-                results.push(`❌ ${id}: HTTP ${response.status}`);
+                return `❌ ${id}: HTTP ${response.status}`;
             }
         } catch (error) {
-            results.push(`❌ ${id}: ${(error as Error).message.slice(0, 50)}`);
+            const msg = (error as Error).name === 'AbortError'
+                ? 'Request timed out'
+                : (error as Error).message.slice(0, 50);
+            return `❌ ${id}: ${msg}`;
+        }
+    });
+
+    // Race all requests against the overall timeout
+    const settled = await Promise.race([
+        Promise.allSettled(promises),
+        new Promise<PromiseSettledResult<string | null>[]>((resolve) =>
+            setTimeout(() => resolve(promises.map(() => ({
+                status: 'rejected' as const,
+                reason: new Error('Overall timeout'),
+            }))), OVERALL_TIMEOUT)
+        ),
+    ]);
+
+    const results: string[] = [];
+    for (const result of settled) {
+        if (result.status === 'fulfilled' && result.value) {
+            results.push(result.value);
         }
     }
 
@@ -216,7 +244,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
     bot.command('trace', async (ctx) => {
         const args = ctx.match?.trim().split(/\s+/) || [];
         const target = args[0];
-        const node = args[1] || 'all';
+        const node = args[1];
 
         if (!target) {
             await ctx.reply('用法: /trace <IP/域名> [节点]');
@@ -225,6 +253,17 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
 
         if (!/^[\w.-]+$/.test(target)) {
             await ctx.reply('❌ Invalid target');
+            return;
+        }
+
+        if (!node) {
+            // Show node selection keyboard first to avoid running traceroute on all nodes
+            // (which would exceed Telegram's webhook timeout)
+            const keyboard = await buildNodeKeyboard('trace', target);
+            await ctx.reply(`🔍 Select a node to trace route to \`${target}\`:`, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard,
+            });
             return;
         }
 
