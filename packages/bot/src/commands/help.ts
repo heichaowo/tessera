@@ -16,7 +16,7 @@ const START_COMMANDS = `*Available Commands 可用命令:*
 • /restart - Restart WG+BGP 重启
 
 *Network Tools 网络工具:*
-• /lg - Looking glass 路由查询
+• /lg - Looking glass 综合查询 (route + path)
 • /route - BIRD route lookup 路由查找
 • /path - AS-Path lookup 路径查询
 • /ping - Ping test 连通测试

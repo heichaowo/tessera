@@ -230,7 +230,19 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             await ctx.editMessageText(loadingText, { parse_mode: 'Markdown' });
         } catch { /* ignore edit errors */ }
 
-        const result = await executeOnAgent(command, target, node);
+        let result: string;
+        if (command === 'lg') {
+            // LG = combined route + path
+            const [routeResult, pathResult] = await Promise.all([
+                executeOnAgent('route', target, node),
+                executeOnAgent('path', target, node),
+            ]);
+            result = `🔍 *Looking Glass: \`${target}\`*\n\n` +
+                `📡 *Route Info:*\n${routeResult}\n\n` +
+                `🛤 *AS Path:*\n${pathResult}`;
+        } else {
+            result = await executeOnAgent(command, target, node);
+        }
         const keyboard = await buildNodeKeyboard(command, target, node);
 
         await ctx.editMessageText(result.slice(0, 4000), {
@@ -353,7 +365,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
     });
 
     /**
-     * /lg <target> - Looking glass (alias for /route)
+     * /lg <target> - Looking glass (combined route + AS path)
      */
     bot.command('lg', async (ctx) => {
         const args = ctx.match?.trim().split(/\s+/) || [];
@@ -361,14 +373,23 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
         const node = args[1] || 'all';
 
         if (!target) {
-            await ctx.reply('用法: /lg <IP/CIDR> [节点]\n例如: /lg 172.22.188.0/27');
+            await ctx.reply('用法: /lg <IP/CIDR> [节点]\n例如: /lg 172.22.188.0/27\n\n综合查询：路由 + AS 路径');
             return;
         }
 
-        const keyboard = await buildNodeKeyboard('route', target, node);
-        const result = await executeOnAgent('route', target, node);
+        // Run route and path queries in parallel
+        const [routeResult, pathResult] = await Promise.all([
+            executeOnAgent('route', target, node),
+            executeOnAgent('path', target, node),
+        ]);
 
-        await ctx.reply(result.slice(0, 4000), {
+        const combined = `🔍 *Looking Glass: \`${target}\`*\n\n` +
+            `📡 *Route Info:*\n${routeResult}\n\n` +
+            `🛤 *AS Path:*\n${pathResult}`;
+
+        const keyboard = await buildNodeKeyboard('lg', target, node);
+
+        await ctx.reply(combined.slice(0, 4000), {
             parse_mode: 'Markdown',
             reply_markup: keyboard,
         });
