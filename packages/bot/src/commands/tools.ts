@@ -148,15 +148,17 @@ async function buildNodeKeyboard(command: string, target: string, currentNode = 
     const keyboard = new InlineKeyboard();
     const nodes = await getNodes();
 
-    // All button
-    const allLabel = currentNode === 'all' ? '✅ 全部' : '全部';
-    keyboard.text(allLabel, `tool:${command}:${target}:all`);
+    // Hide 'All' button for trace (too slow for all nodes)
+    if (command !== 'trace') {
+        const allLabel = currentNode === 'all' ? '✅ 全部' : '全部';
+        keyboard.text(allLabel, `tool:${command}:${target}:all`);
+    }
 
-    // Node buttons
-    let count = 1;
+    // Node buttons - show nodeId + location to avoid duplicate names
+    let count = command !== 'trace' ? 1 : 0;
     for (const [nodeId, node] of nodes) {
-        const name = node.location || nodeId;
-        const label = currentNode === nodeId ? `✅ ${name}` : name;
+        const displayName = node.location ? `${nodeId} ${node.location}` : nodeId;
+        const label = currentNode === nodeId ? `✅ ${displayName}` : displayName;
         keyboard.text(label, `tool:${command}:${target}:${nodeId}`);
 
         count++;
@@ -176,7 +178,19 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
 
         if (!command || !target || !node) return;
 
-        await ctx.answerCallbackQuery('Executing...');
+        await ctx.answerCallbackQuery();
+
+        // Show loading indicator immediately so user knows the click registered
+        const nodes = await getNodes();
+        const nodeInfo = nodes.get(node);
+        const nodeName = nodeInfo ? `${node} ${nodeInfo.location}` : node;
+        const loadingText = node === 'all'
+            ? `⏳ Running ${command} to \`${target}\` on all nodes...`
+            : `⏳ Running ${command} to \`${target}\` on *${nodeName}*...`;
+
+        try {
+            await ctx.editMessageText(loadingText, { parse_mode: 'Markdown' });
+        } catch { /* ignore edit errors */ }
 
         const result = await executeOnAgent(command, target, node);
         const keyboard = await buildNodeKeyboard(command, target, node);
