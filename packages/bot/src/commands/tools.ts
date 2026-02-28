@@ -353,6 +353,28 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
     });
 
     /**
+     * /lg <target> - Looking glass (alias for /route)
+     */
+    bot.command('lg', async (ctx) => {
+        const args = ctx.match?.trim().split(/\s+/) || [];
+        const target = args[0];
+        const node = args[1] || 'all';
+
+        if (!target) {
+            await ctx.reply('用法: /lg <IP/CIDR> [节点]\n例如: /lg 172.22.188.0/27');
+            return;
+        }
+
+        const keyboard = await buildNodeKeyboard('route', target, node);
+        const result = await executeOnAgent('route', target, node);
+
+        await ctx.reply(result.slice(0, 4000), {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard,
+        });
+    });
+
+    /**
      * /path <target> - AS-Path lookup
      */
     bot.command('path', async (ctx) => {

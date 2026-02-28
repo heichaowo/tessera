@@ -17,9 +17,14 @@ const START_COMMANDS = `*Available Commands 可用命令:*
 
 *Network Tools 网络工具:*
 • /lg - Looking glass 路由查询
+• /route - BIRD route lookup 路由查找
+• /path - AS-Path lookup 路径查询
 • /ping - Ping test 连通测试
-• /traceroute - Route trace 路由追踪
+• /trace - Traceroute 路由追踪
+• /tcping - TCP Ping 端口测试
 • /whois - DN42 Whois 查询
+• /dig - DNS lookup 域名查询
+• /findnoc - Find NOC contacts 查找联系人
 • /cancel - Cancel operation 取消操作
 
 📞 Contact: ${config.telegramContact || '@heicha'}`;
