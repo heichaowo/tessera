@@ -488,11 +488,11 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
 
     const models = getModels();
 
-    // Define allowed fields for update
+    // Define allowed fields for update (psk handled separately below)
     const allowedFields = [
         'ipv4', 'ipv6', 'ipv6LinkLocal', 'localIpv4',
         'endpoint', 'credential', 'mtu', 'extensions',
-        'contact', 'data', 'psk'
+        'contact', 'data'
     ];
 
     // Build update object with only allowed fields
@@ -509,14 +509,27 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
         }
     }
 
-    if (Object.keys(updateData).length === 0) {
-        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'No valid fields to update');
-    }
-
-    // Verify session exists
+    // Verify session exists (needed for PSK merge and status check)
     const session = await models.bgpSessions.findOne({ where: { uuid } });
     if (!session) {
         return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
+    }
+
+    // Special handling: PSK is stored inside credential JSON as preshared_key
+    if ('psk' in updates) {
+        const existingCred = session.get('credential') as string | null;
+        let credObj: Record<string, unknown> = {};
+        if (existingCred) {
+            try {
+                credObj = typeof existingCred === 'string' ? JSON.parse(existingCred) : existingCred;
+            } catch { /* use empty */ }
+        }
+        credObj.preshared_key = updates.psk || null;
+        updateData.credential = JSON.stringify(credObj);
+    }
+
+    if (Object.keys(updateData).length === 0) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'No valid fields to update');
     }
 
     // Update session with error handling for PostgreSQL type errors
@@ -534,12 +547,10 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, `Update failed: ${errorMsg}`);
     }
 
-    // Auto-redeploy: if deploy-critical fields changed, queue for re-setup
-    const deployFields = ['ipv4', 'ipv6', 'ipv6LinkLocal', 'localIpv4', 'endpoint', 'credential', 'mtu', 'extensions', 'contact'];
-    const hasDeployChange = deployFields.some(f => f in updateData);
+    // Auto-redeploy: any field change on an ENABLED session triggers re-setup
     const currentStatus = session.get('status') as number;
 
-    if (hasDeployChange && currentStatus === PeeringStatus.ENABLED) {
+    if (currentStatus === PeeringStatus.ENABLED) {
         await models.bgpSessions.update(
             { status: PeeringStatus.QUEUED_FOR_SETUP },
             { where: { uuid } }
