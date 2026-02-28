@@ -3,7 +3,7 @@ import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
 import { getNodes, getAgentEndpoint } from '../providers/nodes';
-import { lookupWhois, formatWhoisResult, getWhoisAttr } from '../services/dn42Registry';
+import { lookupWhois, formatWhoisResult, getWhoisAttr, fetchContacts } from '../services/dn42Registry';
 
 /**
  * Execute tool on agent node(s)
@@ -138,6 +138,28 @@ async function runLocalCommand(command: string, target: string): Promise<string>
             return 'Command timed out';
         }
         return `Error: ${execError.message}`;
+    }
+}
+
+/**
+ * Run a command with explicit args array using Bun.spawn (no shell interpretation).
+ * Used for whois/dig which need multi-argument invocations.
+ */
+async function runSpawnCommand(args: string[], timeoutMs = 10000): Promise<string> {
+    try {
+        const proc = Bun.spawn(args, {
+            stdout: 'pipe',
+            stderr: 'pipe',
+        });
+
+        const timeout = setTimeout(() => proc.kill(), timeoutMs);
+        const stdout = await new Response(proc.stdout).text();
+        const stderr = await new Response(proc.stderr).text();
+        clearTimeout(timeout);
+
+        return stdout || stderr || 'No output';
+    } catch (error) {
+        return `Error: ${(error as Error).message}`;
     }
 }
 
@@ -361,9 +383,11 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
                 await ctx.reply(`❌ 未找到: ${query}`);
             }
         } catch {
-            // Fallback to local whois
-            const server = query.toUpperCase().startsWith('AS') ? '-h whois.dn42' : '';
-            const result = await runLocalCommand('whois', `${server} ${query}`);
+            // Fallback to local whois using spawn (avoids runLocalCommand validation issues)
+            const args = query.toUpperCase().startsWith('AS')
+                ? ['whois', '-h', 'whois.dn42', query]
+                : ['whois', query];
+            const result = await runSpawnCommand(args);
             await ctx.reply(`\`\`\`\n${result.slice(0, 4000)}\n\`\`\``, { parse_mode: 'Markdown' });
         }
     });
@@ -387,8 +411,8 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        // Query DN42 DNS
-        const result = await runLocalCommand('dig', `@172.20.0.53 ${domain} ${recordType} +short`);
+        // Query DN42 DNS using spawn (runLocalCommand rejects multi-arg targets)
+        const result = await runSpawnCommand(['dig', '@172.20.0.53', domain, recordType, '+short']);
 
         await ctx.reply(
             `🔍 *DNS Query*\n\n` +
@@ -411,40 +435,11 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             return;
         }
 
+        const asn = parseInt(query, 10);
+
         try {
-            // Get ASN info from Burble API
-            const asnData = await lookupWhois(`AS${query}`);
-            if (!asnData) {
-                await ctx.reply(`❌ ASN not found 未找到: AS${query}`);
-                return;
-            }
-
-            // Extract admin-c reference
-            const adminC = getWhoisAttr(asnData, 'admin-c');
-            if (!adminC) {
-                await ctx.reply(`ℹ️ No admin-c found for AS${query}\nTry /whois AS${query} for full record`);
-                return;
-            }
-
-            // Extract handle from markdown link "[NAME](person/NAME)"
-            let handle = adminC;
-            const match = adminC.match(/\[([^\]]+)\]/);
-            if (match && match[1]) handle = match[1];
-
-            // Get person record
-            const personData = await lookupWhois(handle);
-            if (!personData) {
-                await ctx.reply(`ℹ️ Person record not found: ${handle}\nTry /whois AS${query} for full record`);
-                return;
-            }
-
-            // Collect contact fields
-            const contacts: string[] = [];
-            const contactFields = ['person', 'e-mail', 'contact', 'remarks'];
-            for (const field of contactFields) {
-                const value = getWhoisAttr(personData, field);
-                if (value) contacts.push(`${field}: ${value}`);
-            }
+            // Use shared fetchContacts which handles all admin-c entries
+            const contacts = await fetchContacts(asn);
 
             if (contacts.length > 0) {
                 await ctx.reply(
@@ -452,30 +447,30 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
                     { parse_mode: 'Markdown' }
                 );
             } else {
-                await ctx.reply(
-                    `ℹ️ No contact info found 未找到联系信息\n` +
-                    `Try /whois AS${query} for full record\n` +
-                    `尝试 /whois AS${query} 查看完整记录`
-                );
-            }
-        } catch {
-            // Fallback to local whois
-            const result = await runLocalCommand('whois', `-h whois.dn42 AS${query}`);
-            const lines = result.split('\n');
-            const contacts: string[] = [];
-            for (const line of lines) {
-                if (line.match(/^(admin-c|tech-c|e-mail|contact|person):/i)) {
-                    contacts.push(line.trim());
+                // Fallback to local whois
+                const result = await runSpawnCommand(['whois', '-h', 'whois.dn42', `AS${query}`]);
+                const lines = result.split('\n');
+                const localContacts: string[] = [];
+                for (const line of lines) {
+                    if (line.match(/^(admin-c|tech-c|e-mail|contact|person):/i)) {
+                        localContacts.push(line.trim());
+                    }
+                }
+                if (localContacts.length > 0) {
+                    await ctx.reply(
+                        `📞 *NOC Contacts for AS${query}*\n\n\`\`\`\n${localContacts.join('\n')}\n\`\`\``,
+                        { parse_mode: 'Markdown' }
+                    );
+                } else {
+                    await ctx.reply(
+                        `ℹ️ No contact info found 未找到联系信息\n` +
+                        `Try /whois AS${query} for full record\n` +
+                        `尝试 /whois AS${query} 查看完整记录`
+                    );
                 }
             }
-            if (contacts.length > 0) {
-                await ctx.reply(
-                    `📞 *NOC Contacts for AS${query}*\n\n\`\`\`\n${contacts.join('\n')}\n\`\`\``,
-                    { parse_mode: 'Markdown' }
-                );
-            } else {
-                await ctx.reply(`ℹ️ No contact info found for AS${query}\nTry /whois AS${query}`);
-            }
+        } catch {
+            await ctx.reply(`❌ Failed to lookup AS${query}`);
         }
     });
 }

@@ -2,24 +2,26 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
+import { getNodes, getAgentEndpoint } from '../providers/nodes';
 
 const ERROR_NOT_LOGGED_IN = '❌ Please /login first\n请先登录';
 
 /**
- * Call agent API
+ * Call agent API using getAgentEndpoint for node resolution
  */
 async function callAgentApi(nodeId: string, method: string, path: string, body?: unknown): Promise<unknown> {
-    const host = (config.agentHosts as Record<string, string>)?.[nodeId];
-    if (!host) return null;
+    const endpoint = await getAgentEndpoint(nodeId);
+    if (!endpoint) return null;
 
     try {
-        const response = await fetch(`http://${host}:${config.agentPort || 8080}${path}`, {
+        const response = await fetch(`${endpoint}${path}`, {
             method,
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${config.agentToken || ''}`,
             },
             body: body ? JSON.stringify(body) : undefined,
+            signal: AbortSignal.timeout(5000),
         });
         return response.json();
     } catch (error) {
@@ -72,19 +74,16 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        // Get first available node
-        const nodes = Object.keys(config.nodeNames as Record<string, string> || {});
-        if (nodes.length === 0) {
-            await ctx.reply('❌ No nodes configured for community stats.');
+        // Get nodes from API provider
+        const nodesMap = await getNodes();
+        const nodeIds = Array.from(nodesMap.keys()).sort();
+        if (nodeIds.length === 0) {
+            await ctx.reply('❌ No nodes available for community stats.');
             return;
         }
 
-        const nodeId = nodes[0];
-        if (!nodeId) {
-            await ctx.reply('❌ No nodes configured for community stats.');
-            return;
-        }
-        const nodeName = config.nodeNames[nodeId] || nodeId;
+        const nodeId = nodeIds[0]!;
+        const nodeName = nodesMap.get(nodeId)?.location || nodeId;
 
         await ctx.reply(`📊 Fetching community stats from ${nodeName}...`);
 
@@ -116,10 +115,10 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
                 .replace('{regions}', regionsText)
                 .replace('{total}', String(stats.total_routes || 0));
 
-            // Node selection keyboard
+            // Node selection keyboard (sorted)
             const keyboard = new InlineKeyboard();
-            nodes.forEach(n => {
-                const name = (config.nodeNames as Record<string, string>)?.[n] || n;
+            nodeIds.forEach(n => {
+                const name = nodesMap.get(n)?.location || n;
                 keyboard.text(n === nodeId ? `✅ ${name}` : name, `community:${n}`);
             });
 
@@ -134,7 +133,9 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
     bot.callbackQuery(/^community:(.+)$/, async (ctx) => {
         const nodeId = ctx.match?.[1];
         if (!nodeId) return;
-        const nodeName = (config.nodeNames as Record<string, string>)?.[nodeId] || nodeId;
+
+        const nodesMap = await getNodes();
+        const nodeName = nodesMap.get(nodeId)?.location || nodeId;
 
         await ctx.answerCallbackQuery('Loading...');
 
@@ -165,10 +166,10 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
             .replace('{regions}', regionsText)
             .replace('{total}', String(stats.total_routes || 0));
 
-        const nodes = Object.keys(config.nodeNames as Record<string, string> || {});
+        const nodeIds = Array.from(nodesMap.keys()).sort();
         const keyboard = new InlineKeyboard();
-        nodes.forEach(n => {
-            const name = (config.nodeNames as Record<string, string>)?.[n] || n;
+        nodeIds.forEach(n => {
+            const name = nodesMap.get(n)?.location || n;
             keyboard.text(n === nodeId ? `✅ ${name}` : name, `community:${n}`);
         });
 
@@ -203,18 +204,15 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
 
         await ctx.answerCallbackQuery('Starting probe...');
 
-        // Get first node
-        const nodes = Object.keys(config.agentHosts as Record<string, string> || {});
-        if (nodes.length === 0) {
+        // Get first node from provider
+        const nodesMap = await getNodes();
+        const nodeIds = Array.from(nodesMap.keys()).sort();
+        if (nodeIds.length === 0) {
             await ctx.answerCallbackQuery('No nodes available');
             return;
         }
 
-        const firstNode = nodes[0];
-        if (!firstNode) {
-            await ctx.answerCallbackQuery('No nodes available');
-            return;
-        }
+        const firstNode = nodeIds[0]!;
 
         const result = await callAgentApi(firstNode, 'POST', `/communities/probe/now/${asn}`) as ProbeResult | null;
 
@@ -237,17 +235,14 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
 }
 
 async function showLatencyStats(ctx: BotContext, asn: number) {
-    const nodes = Object.keys(config.agentHosts as Record<string, string> || {});
-    if (nodes.length === 0) {
-        await ctx.reply('❌ No nodes configured.');
+    const nodesMap = await getNodes();
+    const nodeIds = Array.from(nodesMap.keys()).sort();
+    if (nodeIds.length === 0) {
+        await ctx.reply('❌ No nodes available.');
         return;
     }
 
-    const firstNode = nodes[0];
-    if (!firstNode) {
-        await ctx.reply('❌ No nodes configured.');
-        return;
-    }
+    const firstNode = nodeIds[0]!;
 
     const stats = await callAgentApi(firstNode, 'GET', `/communities/probe/peer/${asn}`) as ProbeStats | null;
 
