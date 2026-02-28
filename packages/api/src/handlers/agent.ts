@@ -235,7 +235,7 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
         attributes: [
             'uuid', 'asn', 'status', 'ipv4', 'ipv6', 'ipv6LinkLocal',
             'type', 'extensions', 'interface', 'endpoint', 'credential',
-            'data', 'mtu', 'policy', 'lastError'
+            'data', 'mtu', 'policy', 'lastError', 'contact'
         ],
         where: { router },
     });
@@ -253,6 +253,8 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
         return {
             uuid: s.uuid,
             asn: parseInt(String(s.asn), 10),  // Convert to number for Go agent
+            name: `AS${s.asn}`,
+            description: s.contact ? `AS${s.asn} - ${s.contact}` : `AS${s.asn}`,
             status: s.status,
             ipv4: s.ipv4,
             ipv6: s.ipv6,
