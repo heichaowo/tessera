@@ -154,9 +154,10 @@ async function buildNodeKeyboard(command: string, target: string, currentNode = 
         keyboard.text(allLabel, `tool:${command}:${target}:all`);
     }
 
-    // Node buttons - show nodeId + location to avoid duplicate names
+    // Node buttons - sorted alphabetically by nodeId for consistent ordering
+    const sortedEntries = Array.from(nodes.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     let count = command !== 'trace' ? 1 : 0;
-    for (const [nodeId, node] of nodes) {
+    for (const [nodeId, node] of sortedEntries) {
         const displayName = node.location ? `${nodeId} ${node.location}` : nodeId;
         const label = currentNode === nodeId ? `✅ ${displayName}` : displayName;
         keyboard.text(label, `tool:${command}:${target}:${nodeId}`);
