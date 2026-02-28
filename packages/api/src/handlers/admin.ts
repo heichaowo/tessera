@@ -534,6 +534,20 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, `Update failed: ${errorMsg}`);
     }
 
+    // Auto-redeploy: if deploy-critical fields changed, queue for re-setup
+    const deployFields = ['ipv4', 'ipv6', 'ipv6LinkLocal', 'localIpv4', 'endpoint', 'credential', 'mtu', 'extensions', 'contact'];
+    const hasDeployChange = deployFields.some(f => f in updateData);
+    const currentStatus = session.get('status') as number;
+
+    if (hasDeployChange && currentStatus === PeeringStatus.ENABLED) {
+        await models.bgpSessions.update(
+            { status: PeeringStatus.QUEUED_FOR_SETUP },
+            { where: { uuid } }
+        );
+        console.log(`[Admin] Session ${uuid} queued for re-setup after field update`);
+        return success(c, { message: 'Session updated, re-deploying' });
+    }
+
     return success(c, { message: 'Session updated' });
 }
 
