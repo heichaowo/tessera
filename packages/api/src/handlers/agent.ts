@@ -254,7 +254,9 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
             uuid: s.uuid,
             asn: parseInt(String(s.asn), 10),  // Convert to number for Go agent
             name: `AS${s.asn}`,
-            description: s.contact ? `AS${s.asn} - ${s.contact}` : `AS${s.asn}`,
+            description: s.contact
+                ? `AS${s.asn} - ${String(s.contact).replace(/[";{}\\]/g, '')}`
+                : `AS${s.asn}`,
             status: s.status,
             ipv4: s.ipv4,
             ipv6: s.ipv6,

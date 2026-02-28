@@ -524,12 +524,19 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
                 credObj = typeof existingCred === 'string' ? JSON.parse(existingCred) : existingCred;
             } catch { /* use empty */ }
         }
-        credObj.preshared_key = updates.psk || null;
+        credObj.preshared_key = updates.psk ?? null;
         updateData.credential = JSON.stringify(credObj);
     }
 
     if (Object.keys(updateData).length === 0) {
         return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'No valid fields to update');
+    }
+
+    // Auto-redeploy: any field change on an ENABLED session triggers re-setup
+    // Merged into a single update to avoid race condition
+    const currentStatus = session.get('status') as number;
+    if (currentStatus === PeeringStatus.ENABLED) {
+        updateData.status = PeeringStatus.QUEUED_FOR_SETUP;
     }
 
     // Update session with error handling for PostgreSQL type errors
@@ -547,14 +554,7 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, `Update failed: ${errorMsg}`);
     }
 
-    // Auto-redeploy: any field change on an ENABLED session triggers re-setup
-    const currentStatus = session.get('status') as number;
-
     if (currentStatus === PeeringStatus.ENABLED) {
-        await models.bgpSessions.update(
-            { status: PeeringStatus.QUEUED_FOR_SETUP },
-            { where: { uuid } }
-        );
         console.log(`[Admin] Session ${uuid} queued for re-setup after field update`);
         return success(c, { message: 'Session updated, re-deploying' });
     }

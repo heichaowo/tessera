@@ -153,14 +153,29 @@ async function runSpawnCommand(args: string[], timeoutMs = 10000): Promise<strin
         });
 
         const timeout = setTimeout(() => proc.kill(), timeoutMs);
-        const stdout = await new Response(proc.stdout).text();
-        const stderr = await new Response(proc.stderr).text();
+
+        // Read stdout and stderr in parallel to avoid deadlock
+        const [stdout, stderr] = await Promise.all([
+            new Response(proc.stdout).text(),
+            new Response(proc.stderr).text(),
+        ]);
+
         clearTimeout(timeout);
+        await proc.exited; // Prevent zombie processes
 
         return stdout || stderr || 'No output';
     } catch (error) {
         return `Error: ${(error as Error).message}`;
     }
+}
+
+/**
+ * Validate user-supplied argument to prevent flag injection.
+ * Rejects args starting with '-' that could pass flags to whois/dig.
+ */
+function sanitizeCommandArg(arg: string): string | null {
+    if (!arg || arg.startsWith('-')) return null;
+    return arg;
 }
 
 /**
@@ -384,9 +399,14 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             }
         } catch {
             // Fallback to local whois using spawn (avoids runLocalCommand validation issues)
-            const args = query.toUpperCase().startsWith('AS')
-                ? ['whois', '-h', 'whois.dn42', query]
-                : ['whois', query];
+            const safeQuery = sanitizeCommandArg(query);
+            if (!safeQuery) {
+                await ctx.reply('❌ 无效查询（不允许 - 开头的参数）');
+                return;
+            }
+            const args = safeQuery.toUpperCase().startsWith('AS')
+                ? ['whois', '-h', 'whois.dn42', safeQuery]
+                : ['whois', safeQuery];
             const result = await runSpawnCommand(args);
             await ctx.reply(`\`\`\`\n${result.slice(0, 4000)}\n\`\`\``, { parse_mode: 'Markdown' });
         }
@@ -397,11 +417,11 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
      */
     bot.command('dig', async (ctx) => {
         const args = ctx.match?.trim().split(/\s+/) || [];
-        const domain = args[0];
+        const domain = sanitizeCommandArg(args[0] || '');
         const recordType = args[1]?.toUpperCase() || 'A';
 
         if (!domain) {
-            await ctx.reply('用法: /dig <域名> [类型]\n例如: /dig moenet.dn42 AAAA');
+            await ctx.reply('用法: /dig <域名> [类型]\n例如: /dig moenet.dn42 AAAA\n（不允许 - 开头的参数）');
             return;
         }
 
