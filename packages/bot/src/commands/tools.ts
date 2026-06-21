@@ -4,6 +4,7 @@ import type { BotContext } from '../index';
 import config from '../config';
 import { getNodes, getAgentEndpoint } from '../providers/nodes';
 import { lookupWhois, formatWhoisResult, getWhoisAttr, fetchContacts } from '../services/dn42Registry';
+import { normalizeAsn, isAsnInput } from './peer/validators';
 
 /**
  * Execute tool on agent node(s)
@@ -91,11 +92,7 @@ async function executeOnAgent(
  * Run command locally (fallback)
  */
 async function runLocalCommand(command: string, target: string): Promise<string> {
-    const { exec } = await import('child_process');
-    const { promisify } = await import('util');
-    const execAsync = promisify(exec);
-
-    // Security: Validate target to prevent command injection
+    // Security: Validate target to prevent injection
     if (/[;&|`$(){}[\]<>\\"']/.test(target)) {
         return 'Invalid target: contains forbidden characters';
     }
@@ -117,28 +114,19 @@ async function runLocalCommand(command: string, target: string): Promise<string>
     const args = cmdMap[command];
     if (!args) return 'Unknown command';
 
-    try {
-        // Use spawn-style exec with args array to avoid shell injection
-        const cmdStr = args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-        const { stdout, stderr } = await execAsync(cmdStr, { timeout: 30000, shell: '/bin/sh' });
+    // Use Bun.spawn (no shell) — consistent with runSpawnCommand
+    const result = await runSpawnCommand(args, 30000);
 
-        // For path command, filter output
-        if (command === 'path') {
-            const lines = (stdout || stderr || '').split('\n');
-            const filtered = lines.filter(line =>
-                line.includes('BGP.as_path') || line.includes('via')
-            );
-            return filtered.join('\n') || 'No AS path found';
-        }
-
-        return stdout || stderr || 'No output';
-    } catch (error) {
-        const execError = error as Error & { killed?: boolean };
-        if (execError.killed) {
-            return 'Command timed out';
-        }
-        return `Error: ${execError.message}`;
+    // For path command, filter output
+    if (command === 'path') {
+        const lines = result.split('\n');
+        const filtered = lines.filter(line =>
+            line.includes('BGP.as_path') || line.includes('via')
+        );
+        return filtered.join('\n') || 'No AS path found';
     }
+
+    return result;
 }
 
 /**
@@ -292,15 +280,19 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             return;
         }
 
+        if (!/^[\w.-]+$/.test(target)) {
+            await ctx.reply('❌ Invalid target');
+            return;
+        }
+
         const targetWithPort = `${target}:${port}`;
         const keyboard = await buildNodeKeyboard('tcping', targetWithPort, 'all');
+        const result = await executeOnAgent('tcping', targetWithPort, 'all');
 
-        await ctx.reply(`🔌 TCPing ${target}:${port}...`, {
+        await ctx.reply(result.slice(0, 4000), {
+            parse_mode: 'Markdown',
             reply_markup: keyboard,
         });
-
-        const result = await executeOnAgent('tcping', targetWithPort, 'all');
-        await ctx.reply(result.slice(0, 4000), { parse_mode: 'Markdown' });
     });
 
     /**
@@ -356,6 +348,11 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
             return;
         }
 
+        if (!/^[\w.:/-]+$/.test(target)) {
+            await ctx.reply('❌ Invalid target');
+            return;
+        }
+
         const keyboard = await buildNodeKeyboard('route', target, node);
         const result = await executeOnAgent('route', target, node);
 
@@ -375,6 +372,11 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
 
         if (!target) {
             await ctx.reply('用法: /lg <IP/CIDR> [节点]\n例如: /lg 172.22.188.0/27\n\n综合查询：路由 + AS 路径');
+            return;
+        }
+
+        if (!/^[\w.:/-]+$/.test(target)) {
+            await ctx.reply('❌ Invalid target');
             return;
         }
 
@@ -416,6 +418,11 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
 
         if (!target) {
             await ctx.reply('用法: /path <IP/CIDR> [节点]');
+            return;
+        }
+
+        if (!/^[\w.:/-]+$/.test(target)) {
+            await ctx.reply('❌ Invalid target');
             return;
         }
 
@@ -502,14 +509,14 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
      * /findnoc <ASN> - Find NOC contacts using Burble REST API
      */
     bot.command('findnoc', async (ctx) => {
-        const query = ctx.match?.trim().replace(/^AS/i, '');
+        const query = ctx.match?.trim();
 
-        if (!query || !/^\d+$/.test(query)) {
+        if (!query || !isAsnInput(query)) {
             await ctx.reply('用法: /findnoc <ASN>\n例如: /findnoc 4242420998');
             return;
         }
 
-        const asn = parseInt(query, 10);
+        const asn = normalizeAsn(query);
 
         try {
             // Use shared fetchContacts which handles all admin-c entries
@@ -517,12 +524,12 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
 
             if (contacts.length > 0) {
                 await ctx.reply(
-                    `📞 *NOC Contacts for AS${query}*\n\n\`\`\`\n${contacts.join('\n')}\n\`\`\``,
+                    `📞 *NOC Contacts for AS${asn}*\n\n\`\`\`\n${contacts.join('\n')}\n\`\`\``,
                     { parse_mode: 'Markdown' }
                 );
             } else {
                 // Fallback to local whois
-                const result = await runSpawnCommand(['whois', '-h', 'whois.dn42', `AS${query}`]);
+                const result = await runSpawnCommand(['whois', '-h', 'whois.dn42', `AS${asn}`]);
                 const lines = result.split('\n');
                 const localContacts: string[] = [];
                 for (const line of lines) {
@@ -532,19 +539,19 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
                 }
                 if (localContacts.length > 0) {
                     await ctx.reply(
-                        `📞 *NOC Contacts for AS${query}*\n\n\`\`\`\n${localContacts.join('\n')}\n\`\`\``,
+                        `📞 *NOC Contacts for AS${asn}*\n\n\`\`\`\n${localContacts.join('\n')}\n\`\`\``,
                         { parse_mode: 'Markdown' }
                     );
                 } else {
                     await ctx.reply(
                         `ℹ️ No contact info found 未找到联系信息\n` +
-                        `Try /whois AS${query} for full record\n` +
-                        `尝试 /whois AS${query} 查看完整记录`
+                        `Try /whois AS${asn} for full record\n` +
+                        `尝试 /whois AS${asn} 查看完整记录`
                     );
                 }
             }
         } catch {
-            await ctx.reply(`❌ Failed to lookup AS${query}`);
+            await ctx.reply(`❌ Failed to lookup AS${asn}`);
         }
     });
 }

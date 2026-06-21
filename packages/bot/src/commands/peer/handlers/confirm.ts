@@ -46,6 +46,8 @@ export function registerConfirmHandlers(bot: Bot<BotContext>) {
                 return;
             }
 
+            const sessionUuid = result.data?.uuid || '';
+
             const statusText = flow.isAdminMode
                 ? `✅ Status: ACTIVE (免审核)`
                 : `⏳ Status: Pending Review\n等待管理员审核`;
@@ -73,13 +75,17 @@ export function registerConfirmHandlers(bot: Bot<BotContext>) {
                         `🆔 ASN: \`AS${asn}\`\n` +
                         `📍 Node: \`${flow.routerName}\`\n` +
                         `🌐 IPv6: \`${flow.ipv6}\`\n` +
-                        `📡 Endpoint: ${flow.endpoint ? `\`${flow.endpoint}:${flow.port}\`` : 'NAT'}\n\n` +
-                        `Use /pending to review`;
+                        `📡 Endpoint: ${flow.endpoint ? `\`${flow.endpoint}:${flow.port}\`` : 'NAT'}\n` +
+                        (flow.contact ? `📞 Contact: \`${flow.contact}\`\n` : '') +
+                        `\nUse /pending to review all`;
 
                     await ctx.api.sendMessage(config.adminChatId, adminNotification, {
                         parse_mode: 'Markdown',
                         reply_markup: new InlineKeyboard()
-                            .text('📋 View Pending', 'admin:pending')
+                            .text('✅ Approve', `approve:${sessionUuid}`)
+                            .text('❌ Reject', `reject:${sessionUuid}`)
+                            .row()
+                            .text('📋 All Pending', 'admin:pending')
                     });
                 } catch (e) {
                     console.error('[Notify Admin] Error:', e);

@@ -48,6 +48,26 @@ export default {
         birdcDownloadUrl: process.env.BIRDC_DOWNLOAD_URL || 'https://github.com/heichaowo/moenet-dn42-binaries/releases/latest/download/birdc',
     },
 
+    telegram: {
+        botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+        adminChatId: process.env.TELEGRAM_ADMIN_CHAT_ID || '',
+    },
+
+    smtp: {
+        host: process.env.SMTP_HOST || '',
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: process.env.SMTP_SECURE === 'true',
+        user: process.env.SMTP_USER || '',
+        pass: process.env.SMTP_PASS || '',
+        from: process.env.SMTP_FROM || 'MoeNet DN42 <noreply@moenet.work>',
+    },
+
+    mailgun: {
+        apiKey: process.env.MAILGUN_API_KEY || '',
+        domain: process.env.MAILGUN_DOMAIN || 'dn42.moenet.work',
+        from: process.env.MAILGUN_FROM || 'DN42 Bot <bot@dn42.moenet.work>',
+    },
+
     features: {
         enableTelegramBot: process.env.TELEGRAM_BOT_ENABLED === 'true',
         telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',

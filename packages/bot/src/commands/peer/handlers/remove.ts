@@ -15,7 +15,7 @@ import { apiRequest } from '../api';
  */
 export function registerRemoveHandlers(bot: Bot<BotContext>) {
     /**
-     * Handle remove selection
+     * Handle remove selection — generate random code for safe deletion
      */
     bot.callbackQuery(/^remove:select:(.+)$/, async (ctx) => {
         const uuid = ctx.match?.[1];
@@ -23,14 +23,19 @@ export function registerRemoveHandlers(bot: Bot<BotContext>) {
 
         await ctx.answerCallbackQuery();
 
-        // Set session step for hybrid confirmation (text "yes" fallback)
+        // Generate 4-char random hex confirmation code
+        const bytes = new Uint8Array(2);
+        crypto.getRandomValues(bytes);
+        const removeCode = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
+        // Set session step with code
         ctx.session.peerFlow = {
             step: 'remove_confirm',
             sessionUuid: uuid,
+            removeCode,
         };
 
-        const keyboard = new InlineKeyboard()
-            .text('✅ Confirm Delete 确认删除', `remove:confirm:${uuid}`)
+        const cancelKeyboard = new InlineKeyboard()
             .text('❌ Cancel 取消', 'remove:cancel');
 
         await ctx.editMessageText(
@@ -38,9 +43,9 @@ export function registerRemoveHandlers(bot: Bot<BotContext>) {
             `Are you sure you want to remove this peer?\n` +
             `确定要删除此 Peer 吗?\n\n` +
             `Session: \`${uuid.slice(0, 8)}...\`\n\n` +
-            `Click button or type \`yes\` to confirm.\n` +
-            `点击按钮或输入 \`yes\` 确认。`,
-            { parse_mode: 'Markdown', reply_markup: keyboard }
+            `⚠️ Type \`${removeCode}\` to confirm deletion.\n` +
+            `请输入 \`${removeCode}\` 确认删除。`,
+            { parse_mode: 'Markdown', reply_markup: cancelKeyboard }
         );
     });
 

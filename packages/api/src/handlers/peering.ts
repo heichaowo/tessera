@@ -7,6 +7,7 @@ import { PeeringRequestSchema, type CreateSessionInput, type GetSessionInput, ty
 import config from '../config';
 import { PeeringStatus, SessionPolicy } from '../db/models/bgpSessions';
 import { generateUUID, getInterfaceName } from '../common/helpers';
+import { determineInitialStatus } from '../services/workflowEngine';
 
 interface JWTPayload {
     asn: string;
@@ -108,11 +109,14 @@ async function createSession(
     const sessionUuid = generateUUID();
     const interfaceName = getInterfaceName(asn);
 
+    // Determine initial status via workflow engine (auto-approve / blacklist / manual)
+    const { status: initialStatus, workflowType } = await determineInitialStatus(asn);
+
     await models.bgpSessions.create({
         uuid: sessionUuid,
         router: data.router,
         asn,
-        status: PeeringStatus.PENDING_REVIEW,
+        status: initialStatus,
         mtu: data.mtu || 1420,
         policy: SessionPolicy.FULL,
         ipv4: data.ipv4 || null,
@@ -124,13 +128,22 @@ async function createSession(
         endpoint: data.endpoint || null,
         credential: data.publicKey || null,
         data: null,
-        lastError: null,
+        lastError: initialStatus === PeeringStatus.REJECTED ? 'ASN is blocked' : null,
     });
+
+    const messages: Record<string, string> = {
+        manual: 'Session created, pending review',
+        auto_approve: 'Session created, auto-approved and queued for setup',
+        auto_reject: 'Session rejected — ASN is blocked',
+    };
+
+    console.log(`[Peering] Created session ${sessionUuid} for AS${asn}, workflow: ${workflowType}`);
 
     return success(c, {
         uuid: sessionUuid,
-        status: PeeringStatus.PENDING_REVIEW,
-        message: 'Session created, pending review',
+        status: initialStatus,
+        workflowType,
+        message: messages[workflowType] || 'Session created',
     });
 }
 

@@ -8,42 +8,11 @@ import { ModifySessionSchema, HeartbeatSchema, MetricsReportSchema } from '../sc
 import { getRedis } from '../db/redisContext';
 import config from '../config';
 import { PeeringStatus, type BgpSessionAttributes } from '../db/models/bgpSessions';
-
-/**
- * Derive link-local address from loopback IPv6
- * Loopback format: fd00:4242:7777:{region}:{node_id}::1
- * LLA format: fe80::998:{region}:{node_id}:1
- */
-function deriveLLAFromLoopback(loopback: string): string {
-    if (!loopback) return 'fe80::998:0:0:1';
-    // Parse loopback like "fd00:4242:7777:101:4::1"
-    const parts = loopback.split(':');
-    if (parts.length < 5) return 'fe80::998:0:0:1';
-    // parts[3] = region (e.g., "101")
-    // parts[4] = node_id (e.g., "4")
-    const region = parts[3] || '0';
-    const nodeId = parts[4] || '0';
-    return `fe80::998:${region}:${nodeId}:1`;
-}
-
-/**
- * Compute loopback IPv6 address from regionCode and nodeId
- * Format: fd00:4242:7777:{region}:{node_id}::1
- * Example: regionCode=101, nodeId=4 -> fd00:4242:7777:101:4::1
- */
-function computeLoopbackIPv6(regionCode: number, nodeId: number): string {
-    if (!regionCode || !nodeId) return '';
-    return `fd00:4242:7777:${regionCode}:${nodeId}::1`;
-}
-
-/**
- * Compute loopback IPv4 address from nodeId
- * Format: 172.22.188.{node_id}
- */
-function computeLoopbackIPv4(nodeId: number): string {
-    if (!nodeId) return '';
-    return `172.22.188.${nodeId}`;
-}
+import {
+    computeLoopbackIPv4,
+    computeLoopbackIPv6,
+    deriveLLAFromLoopback,
+} from '../services/ipAllocator';
 
 /**
  * Map regionCode to continent and subregion LC constants

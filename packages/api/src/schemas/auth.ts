@@ -35,7 +35,7 @@ export const AuthChallengeSchema = z.object({
     action: z.literal('challenge'),
     authState: z.string().min(1, 'authState is required'),
     data: z.union([
-        z.string(),                                      // Email code
+        z.string(),                                      // Email verification code
         z.object({                                        // PGP data
             publicKey: z.string().min(1),
             signedMessage: z.string().min(1),

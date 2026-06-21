@@ -1,16 +1,22 @@
 import type { Context } from 'hono';
 import { sign, verify } from 'hono/jwt';
+import * as openpgp from 'openpgp';
 import { makeResponse, ResponseCode, success } from '../common/response';
+import { logger } from '../common/logger';
 import { getWhoisProvider } from '../providers/whois';
+import { getEmailProvider } from '../providers/email';
 import { validateBody, isValidationError } from '../schemas/validate';
 import { AuthRequestBodySchema, type AuthQueryInput, type AuthRequestInput, type AuthChallengeInput } from '../schemas/auth';
 import config from '../config';
 
 /**
- * Supported authentication methods
+ * Supported authentication methods.
+ *
+ * PASSWORD intentionally omitted — DN42 registry does not use
+ * password-based auth (CRYPT-PW / bcrypt-pw).  Can be re-added
+ * when a local-credential store is implemented.
  */
 enum AuthType {
-    PASSWORD = 0,
     PGP_CLEAR_SIGN = 1,
     SSH = 2,
     EMAIL = 3,
@@ -32,7 +38,7 @@ interface AuthState {
 
 /**
  * Auth Handler - Multi-step authentication flow
- * 
+ *
  * Flow:
  * 1. query - Returns available auth methods for ASN
  * 2. request - Sends challenge (email code or GPG message)
@@ -71,9 +77,12 @@ async function query(c: Context, body: AuthQueryInput): Promise<Response> {
         availableAuthMethods.push({ id: id++, type: AuthType.PGP_CLEAR_SIGN, data: fp });
     }
 
-    // Add emails
-    for (const email of authInfo.emails) {
-        availableAuthMethods.push({ id: id++, type: AuthType.EMAIL, data: email });
+    // Add emails — only when email provider is configured
+    const emailProvider = getEmailProvider();
+    if (emailProvider.isEnabled()) {
+        for (const email of authInfo.emails) {
+            availableAuthMethods.push({ id: id++, type: AuthType.EMAIL, data: email });
+        }
     }
 
     // Add SSH keys
@@ -100,7 +109,7 @@ async function query(c: Context, body: AuthQueryInput): Promise<Response> {
             value: m.data,
             name: m.type === AuthType.PGP_CLEAR_SIGN ? `PGP: ${m.data?.substring(0, 16)}...` :
                 m.type === AuthType.EMAIL ? m.data :
-                    m.type === AuthType.SSH ? 'SSH Key' : 'Password',
+                    m.type === AuthType.SSH ? 'SSH Key' : 'Unknown',
         })),
     });
 }
@@ -149,7 +158,22 @@ async function request(c: Context, body: { authState?: string; authMethod?: numb
     if (authMethod.type === AuthType.PGP_CLEAR_SIGN) {
         authChallenge = code; // User signs this message with their PGP key
     } else if (authMethod.type === AuthType.EMAIL) {
-        // TODO: Send email with code
+        // Send verification code email
+        const emailProvider = getEmailProvider();
+        const result = await emailProvider.sendVerificationCode(
+            authMethod.data!,
+            typeof state.asn === 'string' ? Number(state.asn) : state.asn as unknown as number,
+            code,
+        );
+        if (!result.success) {
+            logger.error('Failed to send verification email', undefined, {
+                to: authMethod.data,
+                asn: state.asn,
+                error: result.error,
+            });
+            return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined,
+                `Failed to send verification email: ${result.error}`);
+        }
         authChallenge = 'Check your email';
     }
 
@@ -181,27 +205,12 @@ async function challenge(c: Context, body: { authState?: string; data?: unknown 
     let authResult = false;
 
     if (authMethod.type === AuthType.PGP_CLEAR_SIGN) {
-        // Expect: { publicKey: string, signedMessage: string }
-        const pgpData = data as { publicKey?: string; signedMessage?: string };
-
-        if (!pgpData.publicKey || !pgpData.signedMessage) {
-            return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing PGP data');
-        }
-
-        // Check if signed message contains the challenge code
-        if (pgpData.signedMessage.includes(code)) {
-            // TODO: Verify PGP signature using openpgp library
-            // For now, just check if code is present
-            authResult = true;
-        }
+        authResult = await verifyPgpSignature(data, code, authMethod.data, asn);
     } else if (authMethod.type === AuthType.EMAIL) {
         // Expect: string (the code from email)
         if (typeof data === 'string' && data.trim() === code) {
             authResult = true;
         }
-    } else if (authMethod.type === AuthType.PASSWORD) {
-        // TODO: Verify password hash
-        authResult = false;
     }
 
     if (!authResult) {
@@ -216,6 +225,95 @@ async function challenge(c: Context, body: { authState?: string; data?: unknown 
     );
 
     return success(c, { authResult: true, token });
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Verify PGP cleartext signature against challenge code and registry fingerprint.
+ *
+ * @param data - Submitted PGP data ({ publicKey, signedMessage })
+ * @param code - Expected challenge code
+ * @param registryFingerprint - Fingerprint from DN42 registry mntner `auth` field
+ * @param asn - ASN for logging context
+ * @returns Whether the signature is valid and key fingerprint matches
+ */
+async function verifyPgpSignature(
+    data: unknown,
+    code: string,
+    registryFingerprint: string | undefined,
+    asn: string,
+): Promise<boolean> {
+    const pgpData = data as { publicKey?: string; signedMessage?: string };
+
+    if (!pgpData.publicKey || !pgpData.signedMessage) {
+        logger.warn('PGP verification: missing publicKey or signedMessage', { asn });
+        return false;
+    }
+
+    try {
+        // Parse the submitted public key
+        const publicKey = await openpgp.readKey({ armoredKey: pgpData.publicKey });
+
+        // Parse the cleartext signed message
+        const message = await openpgp.readCleartextMessage({
+            cleartextMessage: pgpData.signedMessage,
+        });
+
+        // Cryptographically verify the signature
+        const verification = await openpgp.verify({
+            message,
+            verificationKeys: publicKey,
+        });
+
+        const sig = verification.signatures[0];
+        if (!sig) {
+            logger.warn('PGP verification: no signatures found', { asn });
+            return false;
+        }
+        await sig.verified; // Throws on invalid signature
+
+        // Verify the signed text matches the challenge code
+        const signedText = message.getText().trim();
+        if (signedText !== code) {
+            logger.warn('PGP verification: signed text does not match challenge code', {
+                asn,
+                expected: code,
+                got: signedText,
+            });
+            return false;
+        }
+
+        // Verify key fingerprint matches the one registered in DN42
+        const keyFingerprint = publicKey.getFingerprint().toUpperCase();
+        const expectedFp = (registryFingerprint || '').toUpperCase().replace(/\s/g, '');
+
+        if (!expectedFp) {
+            logger.warn('PGP verification: no registry fingerprint to match against', { asn });
+            return false;
+        }
+
+        // Support full fingerprint match, or long key ID (≥16 chars) suffix match
+        const fpMatch = keyFingerprint === expectedFp
+            || (expectedFp.length >= 16 && keyFingerprint.endsWith(expectedFp));
+        if (!fpMatch) {
+            logger.warn('PGP verification: fingerprint mismatch', {
+                asn,
+                keyFingerprint,
+                registryFingerprint: expectedFp,
+            });
+            return false;
+        }
+
+        logger.info('PGP verification successful', { asn, fingerprint: keyFingerprint });
+        return true;
+    } catch (err) {
+        logger.warn('PGP verification failed', {
+            asn,
+            error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+    }
 }
 
 /**

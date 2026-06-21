@@ -1,8 +1,13 @@
 /**
  * Info Collect Module
  *
- * Shared step functions for peer wizard flows (/peer, /addpeer, /modify).
- * Adapted from moenet-dn42-control-plane/src/bot/commands/info_collect.py
+ * @deprecated This module is no longer used by the active peer wizard flow.
+ * The active implementation is the switch-case state machine in peer.ts,
+ * which uses ui.ts prompt functions and validators.ts for validation.
+ * This module is retained as a reference for the original Python-mirrored
+ * architecture and may be removed in a future cleanup.
+ *
+ * Original: moenet-dn42-control-plane/src/bot/commands/info_collect.py
  *
  * Design:
  * - Uses ReplyKeyboard for selection menus (stays at bottom during long flows)

@@ -1,5 +1,8 @@
 import { Sequelize } from 'sequelize';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import config from '../config';
+import { runMigrations } from './migrationRunner';
 
 // Model imports
 import { initBgpSessionsModel, type BgpSessionsModel } from './models/bgpSessions';
@@ -56,6 +59,14 @@ export async function initDatabase(): Promise<void> {
     if (process.env.NODE_ENV !== 'production') {
         await sequelize.sync({ alter: true });
     }
+
+    // Run pending SQL migrations (both dev and prod)
+    // migrations/ dir is at the monorepo root: moenet-core/migrations/
+    const currentDir = typeof __dirname !== 'undefined'
+        ? __dirname
+        : dirname(fileURLToPath(import.meta.url));
+    const migrationsDir = resolve(currentDir, '..', '..', '..', 'migrations');
+    await runMigrations(sequelize, models.settings, migrationsDir);
 }
 
 export function getModels(): Models {

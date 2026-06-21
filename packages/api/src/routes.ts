@@ -5,6 +5,7 @@ import adminHandler from './handlers/admin';
 import peeringHandler from './handlers/peering';
 import metricsHandler from './handlers/metrics';
 import bootstrapHandler from './handlers/bootstrap';
+import flapHandler from './handlers/flap';
 
 export function registerRoutes(app: Hono) {
     // Bootstrap API (for node initialization)
@@ -17,6 +18,10 @@ export function registerRoutes(app: Hono) {
     app.post('/api/v1/agent/:router/mesh/status', agentHandler);
     // Also support heartbeat without router param
     app.post('/api/v1/agent/heartbeat', agentHandler);
+
+    // Flap detection (FlapAlerted webhooks)
+    app.post('/api/v1/flap/alert', flapHandler);
+    app.post('/api/v1/flap/resolved', flapHandler);
 
     // Authentication
     app.post('/api/v1/auth', authHandler);

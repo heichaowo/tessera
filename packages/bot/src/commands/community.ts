@@ -3,6 +3,7 @@ import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
 import { getNodes, getAgentEndpoint } from '../providers/nodes';
+import { normalizeAsn } from './peer/validators';
 
 const ERROR_NOT_LOGGED_IN = '❌ Please /login first\n请先登录';
 
@@ -88,7 +89,7 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
         await ctx.reply(`📊 Fetching community stats from ${nodeName}...`);
 
         try {
-            const stats = await callAgentApi(nodeId, 'GET', '/communities') as CommunityStats | null;
+            const stats = await callAgentApi(nodeId, 'GET', '/community') as CommunityStats | null;
 
             if (!stats) {
                 await ctx.reply('❌ Failed to get community stats.\n无法获取 community 统计。');
@@ -139,7 +140,7 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
 
         await ctx.answerCallbackQuery('Loading...');
 
-        const stats = await callAgentApi(nodeId, 'GET', '/communities') as CommunityStats | null;
+        const stats = await callAgentApi(nodeId, 'GET', '/community') as CommunityStats | null;
 
         if (!stats) {
             await ctx.answerCallbackQuery('Failed to load stats');
@@ -185,8 +186,8 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
             return;
         }
 
-        const asnArg = ctx.match?.trim().replace(/^AS/i, '');
-        const asn = asnArg ? parseInt(asnArg) : ctx.session.asn;
+        const asnRaw = ctx.match?.trim();
+        const asn = asnRaw ? normalizeAsn(asnRaw) : ctx.session.asn;
 
         if (!asn || isNaN(asn)) {
             await ctx.reply('用法: /latency [ASN]\n例如: /latency 4242421234');
@@ -214,7 +215,7 @@ export function registerCommunityCommands(bot: Bot<BotContext>) {
 
         const firstNode = nodeIds[0]!;
 
-        const result = await callAgentApi(firstNode, 'POST', `/communities/probe/now/${asn}`) as ProbeResult | null;
+        const result = await callAgentApi(firstNode, 'POST', '/probe/now', { asn }) as ProbeResult | null;
 
         if (result?.success) {
             await ctx.answerCallbackQuery(`✅ Probe: ${result.rtt_ms?.toFixed(1)}ms (Tier ${result.latency_tier})`);
@@ -244,7 +245,7 @@ async function showLatencyStats(ctx: BotContext, asn: number) {
 
     const firstNode = nodeIds[0]!;
 
-    const stats = await callAgentApi(firstNode, 'GET', `/communities/probe/peer/${asn}`) as ProbeStats | null;
+    const stats = await callAgentApi(firstNode, 'POST', '/probe/stats', { asn }) as ProbeStats | null;
 
     const keyboard = new InlineKeyboard()
         .text('🔄 立即探测 Probe Now', `probe_now:${asn}`);

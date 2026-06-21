@@ -119,5 +119,39 @@ export function cleanupRateLimits(): void {
     }
 }
 
+/**
+ * Auto-register middleware for backfilling existing users.
+ * If the session has an ASN (user is logged in) but hasn't been registered
+ * to the DB yet in this session, silently call the API to persist the mapping.
+ */
+export function autoRegisterMiddleware<C extends Context & { session: { asn?: number; _registered?: boolean } }>(apiUrl: string, apiToken: string) {
+    return async (ctx: C, next: NextFunction) => {
+        // Only run if user is logged in and not yet registered in this session
+        if (ctx.session.asn && !ctx.session._registered && ctx.from?.id) {
+            // Fire-and-forget: don't block the command handler
+            const asn = ctx.session.asn;
+            const telegramId = ctx.from.id;
+            fetch(`${apiUrl}/admin`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiToken}`,
+                },
+                body: JSON.stringify({
+                    action: 'registerTelegramId',
+                    asn,
+                    telegramId,
+                }),
+            }).then(() => {
+                ctx.session._registered = true;
+            }).catch((error) => {
+                console.error('[AutoRegister] Failed to register telegramId:', error);
+            });
+        }
+
+        return next();
+    };
+}
+
 // Cleanup every 5 minutes
 setInterval(cleanupRateLimits, 5 * 60 * 1000);

@@ -8,6 +8,13 @@ import config from '../config';
 import { PeeringStatus, SessionPolicy } from '../db/models/bgpSessions';
 import { Op } from 'sequelize';
 import { generateUUID, getInterfaceName, getListenPort } from '../common/helpers';
+import { assertTransition, getWhitelist, saveWhitelist } from '../services/workflowEngine';
+import {
+    getContinentFromRegionCode,
+    getNextAvailableNodeId,
+    computeLoopbackIPv4,
+    computeLoopbackIPv6,
+} from '../services/ipAllocator';
 
 interface JWTPayload {
     asn: string;
@@ -66,6 +73,8 @@ async function isAdmin(c: Context): Promise<boolean> {
  * - blockAsn: Block an ASN from peering
  * - unblockAsn: Unblock an ASN
  * - enumBlocklist: List all blocked ASNs
+ * - registerTelegramId: Upsert (asn, telegramId) into users table
+ * - getNotificationTargets: Query users with active peers (for announcements)
  */
 export default async function adminHandler(c: Context): Promise<Response> {
     if (!(await isAdmin(c))) {
@@ -116,6 +125,18 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await enumBlocklist(c);
         case 'sendEmail':
             return await sendVerificationEmail(c, body);
+        case 'whitelistAsn':
+            return await whitelistAsn(c, body);
+        case 'unwhitelistAsn':
+            return await unwhitelistAsn(c, body);
+        case 'enumWhitelist':
+            return await enumWhitelist(c);
+        case 'snapshot':
+            return await generateSnapshot(c);
+        case 'registerTelegramId':
+            return await registerTelegramId(c, body);
+        case 'getNotificationTargets':
+            return await getNotificationTargets(c, body);
         default:
             return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
     }
@@ -206,12 +227,6 @@ async function createRouter(c: Context, body: CreateRouterBody): Promise<Respons
 
     const models = getModels();
 
-    // Generate next nodeId
-    const lastRouter = await models.routers.findOne({
-        order: [['node_id', 'DESC']],
-    });
-    const nextNodeId = ((lastRouter?.get('nodeId') as number) || 0) + 1;
-
     // Map region string to regionCode
     const regionCodeMap: Record<string, number> = {
         'AS-E': 101, 'AS-SE': 102, 'AS-S': 103, 'AS-N': 104,
@@ -220,6 +235,21 @@ async function createRouter(c: Context, body: CreateRouterBody): Promise<Respons
         'OC': 401, 'AF': 501, 'ME': 502,
     };
     const regionCode = regionCodeMap[body.region?.toUpperCase()] || 101;
+
+    // Continent-aware nodeId allocation (gap-filling within range)
+    const continent = getContinentFromRegionCode(regionCode);
+    const allRouters = await models.routers.findAll({ attributes: ['nodeId'] });
+    const existingIds = allRouters.map((r) => r.get('nodeId') as number);
+    const nextNodeId = getNextAvailableNodeId(continent, existingIds);
+
+    if (nextNodeId === null) {
+        return makeResponse(
+            c,
+            ResponseCode.VALIDATION_ERROR,
+            undefined,
+            `No available node IDs for continent ${continent}. Range is full.`,
+        );
+    }
 
     // Map role to nodeType
     const nodeType = body.role === 'rr' ? 'rr' : 'client';
@@ -240,9 +270,9 @@ async function createRouter(c: Context, body: CreateRouterBody): Promise<Respons
             regionCode,
             supportsIpv4: !!body.ipv4,
             supportsIpv6: !!body.ipv6,
-            // Auto-generate loopback IPs based on regionCode and nodeId
-            dn42Loopback4: `172.22.188.${nextNodeId}`,
-            dn42Loopback6: `fd00:4242:7777:${regionCode}:${nextNodeId}::1`,
+            // Auto-generate loopback IPs via IP allocator
+            dn42Loopback4: computeLoopbackIPv4(nextNodeId),
+            dn42Loopback6: computeLoopbackIPv6(regionCode, nextNodeId),
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any);
 
@@ -384,20 +414,35 @@ async function approveSession(c: Context, body: { uuid?: string }): Promise<Resp
 
     const models = getModels();
 
+    // Validate state transition
+    const session = await models.bgpSessions.findOne({ where: { uuid: body.uuid } });
+    if (!session) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
+    }
+
+    const currentStatus = session.get('status') as PeeringStatus;
+    try {
+        assertTransition(currentStatus, PeeringStatus.QUEUED_FOR_SETUP);
+    } catch (err) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, (err as Error).message);
+    }
+
+    // Optimistic lock: include current status in WHERE to prevent TOCTOU race
     const [updated] = await models.bgpSessions.update(
         { status: PeeringStatus.QUEUED_FOR_SETUP },
-        { where: { uuid: body.uuid, status: PeeringStatus.PENDING_REVIEW } }
+        { where: { uuid: body.uuid, status: currentStatus } }
     );
 
     if (!updated) {
-        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found or not pending');
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Session status changed concurrently');
     }
 
-    return success(c, { message: 'Session approved' });
+    console.log(`[Admin] Session ${body.uuid} approved (PENDING_REVIEW → QUEUED_FOR_SETUP)`);
+    return success(c, { message: 'Session approved', uuid: body.uuid });
 }
 
 /**
- * Reject a pending session (moves to DISABLED)
+ * Reject a pending session (moves to REJECTED)
  */
 async function rejectSession(c: Context, body: { uuid?: string; reason?: string }): Promise<Response> {
     if (!body.uuid) {
@@ -406,19 +451,34 @@ async function rejectSession(c: Context, body: { uuid?: string; reason?: string 
 
     const models = getModels();
 
+    // Validate state transition
+    const session = await models.bgpSessions.findOne({ where: { uuid: body.uuid } });
+    if (!session) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found');
+    }
+
+    const currentStatus = session.get('status') as PeeringStatus;
+    try {
+        assertTransition(currentStatus, PeeringStatus.REJECTED);
+    } catch (err) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, (err as Error).message);
+    }
+
+    // Optimistic lock: include current status in WHERE to prevent TOCTOU race
     const [updated] = await models.bgpSessions.update(
         {
-            status: PeeringStatus.DISABLED,
+            status: PeeringStatus.REJECTED,
             lastError: body.reason || 'Rejected by admin',
         },
-        { where: { uuid: body.uuid, status: PeeringStatus.PENDING_REVIEW } }
+        { where: { uuid: body.uuid, status: currentStatus } }
     );
 
     if (!updated) {
-        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Session not found or not pending');
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Session status changed concurrently');
     }
 
-    return success(c, { message: 'Session rejected' });
+    console.log(`[Admin] Session ${body.uuid} rejected: ${body.reason || 'No reason'}`);
+    return success(c, { message: 'Session rejected', uuid: body.uuid });
 }
 
 /**
@@ -582,13 +642,16 @@ async function setMaintenance(c: Context, body: { router?: string; enabled?: boo
         return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Router not found');
     }
 
+    const callbackUrl = routerRecord.get('callbackUrl') as string | null;
     const publicIp = routerRecord.get('publicIp') as string;
-    if (!publicIp) {
-        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Router has no public IP');
+
+    if (!callbackUrl && !publicIp) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Router has no callback URL or public IP');
     }
 
-    // Call agent's maintenance API
-    const agentUrl = `http://${publicIp}:8080/maintenance/${enabled ? 'start' : 'stop'}`;
+    // Call agent's maintenance API (prefer callbackUrl, fallback to IP:24368)
+    const agentBase = callbackUrl || `http://${publicIp}:24368`;
+    const agentUrl = `${agentBase}/maintenance/${enabled ? 'start' : 'stop'}`;
 
     try {
         const agentResp = await fetch(agentUrl, {
@@ -995,5 +1058,268 @@ async function enumBlocklist(c: Context): Promise<Response> {
     } catch (error) {
         console.error('[Admin] Error listing blocklist:', error);
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to list blocklist');
+    }
+}
+
+// =============================================================================
+// ASN Auto-Approve Whitelist (stored in settings KV via workflowEngine)
+// =============================================================================
+
+/**
+ * Add an ASN to the auto-approve whitelist.
+ */
+async function whitelistAsn(c: Context, body: { asn?: number }): Promise<Response> {
+    if (!body.asn) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing asn');
+    }
+
+    try {
+        const whitelist = await getWhitelist();
+
+        if (whitelist.some(w => w.asn === body.asn)) {
+            return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'ASN already whitelisted');
+        }
+
+        whitelist.push({
+            asn: body.asn,
+            addedAt: new Date().toISOString(),
+        });
+
+        await saveWhitelist(whitelist);
+        console.log(`[Admin] Whitelisted ASN ${body.asn} for auto-approve`);
+
+        return success(c, { message: `AS${body.asn} added to auto-approve whitelist` });
+    } catch (error) {
+        console.error('[Admin] Error whitelisting ASN:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to whitelist ASN');
+    }
+}
+
+/**
+ * Remove an ASN from the auto-approve whitelist.
+ */
+async function unwhitelistAsn(c: Context, body: { asn?: number }): Promise<Response> {
+    if (!body.asn) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing asn');
+    }
+
+    try {
+        const whitelist = await getWhitelist();
+        const filtered = whitelist.filter(w => w.asn !== body.asn);
+
+        if (filtered.length === whitelist.length) {
+            return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'ASN not in whitelist');
+        }
+
+        await saveWhitelist(filtered);
+        console.log(`[Admin] Removed ASN ${body.asn} from auto-approve whitelist`);
+
+        return success(c, { message: `AS${body.asn} removed from auto-approve whitelist` });
+    } catch (error) {
+        console.error('[Admin] Error removing ASN from whitelist:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to remove ASN from whitelist');
+    }
+}
+
+/**
+ * List all auto-approved ASNs.
+ */
+async function enumWhitelist(c: Context): Promise<Response> {
+    try {
+        const whitelist = await getWhitelist();
+        return success(c, { whitelist });
+    } catch (error) {
+        console.error('[Admin] Error listing whitelist:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to list whitelist');
+    }
+}
+
+/**
+ * Generate a full infrastructure snapshot for disaster recovery.
+ *
+ * Returns all nodes and active peers in a single JSON blob with a SHA-256
+ * integrity hash. Credentials are excluded to limit exposure.
+ */
+async function generateSnapshot(c: Context): Promise<Response> {
+    const models = getModels();
+
+    try {
+        const [allRouters, allSessions] = await Promise.all([
+            models.routers.findAll(),
+            models.bgpSessions.findAll({
+                where: {
+                    status: { [Op.in]: [PeeringStatus.ENABLED, PeeringStatus.QUEUED_FOR_SETUP] },
+                },
+                order: [['asn', 'ASC']],
+            }),
+        ]);
+
+        const nodes = allRouters.map((r) => {
+            const attrs = r.get() as unknown as Record<string, unknown>;
+            const nodeId = (attrs.nodeId as number) ?? 0;
+            const regionCode = (attrs.regionCode as number) ?? 0;
+            return {
+                id: nodeId,
+                name: attrs.name as string,
+                location: attrs.location as string,
+                nodeType: (attrs.nodeType as string) ?? 'client',
+                regionCode,
+                bandwidth: (attrs.bandwidth as string) ?? '1G',
+                provider: (attrs.provider as string) ?? '',
+                loopbackIpv4: computeLoopbackIPv4(nodeId),
+                loopbackIpv6: computeLoopbackIPv6(regionCode, nodeId),
+                lastSeen: attrs.lastSeen ? (attrs.lastSeen as Date).toISOString() : null,
+            };
+        });
+
+        // Build a uuid→name lookup for router resolution
+        const routerNameMap = new Map(
+            allRouters.map((r) => [r.get('uuid') as string, r.get('name') as string]),
+        );
+
+        const peers = allSessions.map((s) => {
+            const attrs = s.get() as unknown as Record<string, unknown>;
+            return {
+                uuid: attrs.uuid as string,
+                asn: attrs.asn as number,
+                routerName: routerNameMap.get(attrs.router as string) ?? attrs.router,
+                status: attrs.status as number,
+                type: (attrs.type as string) ?? 'wireguard',
+                ipv4: attrs.ipv4 ?? null,
+                ipv6: attrs.ipv6 ?? null,
+                ipv6LinkLocal: attrs.ipv6LinkLocal ?? null,
+                endpoint: attrs.endpoint ?? null,
+                mtu: attrs.mtu ?? 1420,
+                interface: attrs.interface ?? null,
+                contact: attrs.contact ?? null,
+                createdAt: attrs.createdAt ? (attrs.createdAt as Date).toISOString() : null,
+            };
+        });
+
+        const snapshot = {
+            version: '3.0.0',
+            generatedAt: new Date().toISOString(),
+            nodesCount: nodes.length,
+            peersCount: peers.length,
+            nodes,
+            peers,
+        };
+
+        // Compute integrity hash (deterministic JSON with recursive key sorting)
+        // Sort arrays by stable keys (nodeId for nodes, uuid for peers) before hashing
+        const sortedSnapshot = {
+            ...snapshot,
+            nodes: [...snapshot.nodes].sort((a, b) => a.id - b.id),
+            peers: [...snapshot.peers].sort((a, b) => a.uuid.localeCompare(b.uuid)),
+        };
+        const sortKeys = (_key: string, value: unknown) =>
+            value && typeof value === 'object' && !Array.isArray(value)
+                ? Object.keys(value as Record<string, unknown>).sort().reduce((sorted, k) => {
+                    (sorted as Record<string, unknown>)[k] = (value as Record<string, unknown>)[k];
+                    return sorted;
+                }, {} as Record<string, unknown>)
+                : value;
+        const snapshotStr = JSON.stringify(sortedSnapshot, sortKeys);
+        const hashBuffer = new Bun.CryptoHasher('sha256').update(snapshotStr).digest('hex');
+
+        return success(c, {
+            ...snapshot,
+            snapshotHash: hashBuffer,
+        });
+    } catch (error) {
+        console.error('[Admin] Error generating snapshot:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to generate snapshot');
+    }
+}
+
+/**
+ * Register or update Telegram ID for a user.
+ * Called by bot on login success and by auto-register middleware.
+ */
+async function registerTelegramId(
+    c: Context,
+    body: { asn?: number; telegramId?: number | string }
+): Promise<Response> {
+    const { asn, telegramId } = body;
+
+    if (asn == null || telegramId == null) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing asn or telegramId');
+    }
+
+    const models = getModels();
+
+    try {
+        const [user, created] = await models.users.findOrCreate({
+            where: { asn: Number(asn) },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            defaults: {
+                asn: Number(asn),
+                telegramId: Number(telegramId),
+                isAdmin: false,
+                isBanned: false,
+            } as any,
+        });
+
+        if (!created) {
+            await user.update({ telegramId: Number(telegramId) });
+        }
+
+        console.log(`[Admin] ${created ? 'Created' : 'Updated'} user AS${asn} with telegramId ${telegramId}`);
+        return success(c, { message: 'User registered', created });
+    } catch (error) {
+        console.error('[Admin] Error registering telegramId:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to register user');
+    }
+}
+
+/**
+ * Get notification targets — users with active BGP sessions and a registered telegramId.
+ * Optionally filter by ASN list.
+ */
+async function getNotificationTargets(
+    c: Context,
+    body: { asns?: number[] }
+): Promise<Response> {
+    const models = getModels();
+
+    try {
+        // Find ASNs with active or problematic sessions
+        // Include PROBLEM and QUEUED_FOR_SETUP so those users can also receive notifications
+        const sessionWhere: Record<string, unknown> = {
+            status: { [Op.in]: [PeeringStatus.ENABLED, PeeringStatus.QUEUED_FOR_SETUP, PeeringStatus.PROBLEM] },
+        };
+        if (body.asns && body.asns.length > 0) {
+            sessionWhere.asn = { [Op.in]: body.asns.map(Number) };
+        }
+
+        const sessions = await models.bgpSessions.findAll({
+            where: sessionWhere,
+            attributes: ['asn'],
+            group: ['asn'],
+        });
+
+        const activeAsns = sessions.map(s => s.get('asn') as number);
+
+        if (activeAsns.length === 0) {
+            return success(c, { targets: [] });
+        }
+
+        // Find users with telegramId for those ASNs
+        const users = await models.users.findAll({
+            where: {
+                asn: { [Op.in]: activeAsns },
+                telegramId: { [Op.ne]: null },
+            },
+        });
+
+        const targets = users.map(u => ({
+            asn: u.get('asn') as number,
+            telegramId: u.get('telegramId') as number,
+        }));
+
+        return success(c, { targets });
+    } catch (error) {
+        console.error('[Admin] Error getting notification targets:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to get notification targets');
     }
 }

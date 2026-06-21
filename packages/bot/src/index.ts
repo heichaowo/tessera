@@ -2,7 +2,7 @@ import { Bot, Context, session, type SessionFlavor, webhookCallback } from 'gram
 import { Hono } from 'hono';
 import { registerCommands } from './commands';
 import config from './config';
-import { rateLimitMiddleware, metricsMiddleware, getMetricsSummary } from './middleware';
+import { rateLimitMiddleware, metricsMiddleware, autoRegisterMiddleware, getMetricsSummary } from './middleware';
 import { createRedisStorage } from './storage';
 
 /**
@@ -34,9 +34,13 @@ interface SessionData {
         mtu?: number;
         psk?: string | null;
         contact?: string;
-        nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number; name?: string }>;
+        nodeMap?: Record<string, { uuid: string; endpoint: string; pubkey: string; nodeId: number; regionCode: number; name?: string; allowCnPeers?: boolean }>;
         // For modify flow - diff tracking (dn42-bot style)
         asn?: number;
+        // Per-node China IP restriction (from selected router)
+        allowCnPeers?: boolean;
+        // Random hex code for /remove confirmation
+        removeCode?: string;
         // Pending migration (deferred until confirm)
         pendingMigration?: { nodeUuid: string; nodeName: string };
         backup?: {
@@ -72,6 +76,8 @@ interface SessionData {
         step: 'name' | 'hostname' | 'ipv4' | 'ipv6' | 'role' | 'region' | 'location' | 'provider' | 'bandwidth' | 'max_peers' | 'allow_cn' | 'confirm';
         data: Record<string, unknown>;
     };
+    /** Set to true after telegramId has been registered to DB for this session */
+    _registered?: boolean;
 }
 
 export type BotContext = Context & SessionFlavor<SessionData>;
@@ -91,6 +97,9 @@ export function createBot(): Bot<BotContext> {
 
     // Rate limiting middleware
     bot.use(rateLimitMiddleware());
+
+    // Auto-register middleware — backfills (asn, telegramId) for existing users
+    bot.use(autoRegisterMiddleware(config.apiUrl, config.apiToken));
 
     // Metrics collection middleware
     bot.use(metricsMiddleware());
@@ -114,6 +123,7 @@ async function setBotCommands(bot: Bot<BotContext>) {
         { command: 'login', description: 'Login with ASN 登录' },
         { command: 'logout', description: 'Logout 登出' },
         { command: 'peer', description: 'Create peer 建立连接' },
+        { command: 'peers', description: 'List peers 连接列表' },
         { command: 'info', description: 'Peer status 连接状态' },
         { command: 'modify', description: 'Modify peer 修改连接' },
         { command: 'remove', description: 'Remove peer 删除连接' },

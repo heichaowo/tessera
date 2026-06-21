@@ -21,6 +21,7 @@ import {
     LOGIN_EMAIL_SENT,
     ERROR_NOT_LOGGED_IN,
 } from '../i18n';
+import { normalizeAsn, isAsnInput } from './peer/validators';
 
 
 // =============================================================================
@@ -74,6 +75,21 @@ async function apiRequest(endpoint: string, method = 'POST', body?: unknown, tok
         body: body ? JSON.stringify(body) : undefined,
     });
     return response.json() as Promise<APIResponse>;
+}
+
+/**
+ * Register user telegramId via admin API (fire-and-forget).
+ */
+async function registerUserTelegramId(asn: number, telegramId: number): Promise<void> {
+    try {
+        await apiRequest('/admin', 'POST', {
+            action: 'registerTelegramId',
+            asn,
+            telegramId,
+        }, config.apiToken);
+    } catch (error) {
+        console.error('[Login] Failed to register telegramId:', error);
+    }
 }
 
 // =============================================================================
@@ -495,13 +511,12 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         }
 
         // Check if it looks like an ASN
-        const asnMatch = text.match(/^(?:AS)?(\d+)$/i);
-        if (!asnMatch?.[1]) {
-            await ctx.reply(`${ICONS.error} Invalid ASN format. Example: 4242420998\n无效的 ASN 格式。`);
+        if (!isAsnInput(text)) {
+            await ctx.reply(`${ICONS.error} Invalid ASN format. Example: 4242420998 or 0998\n无效的 ASN 格式。`);
             return;
         }
 
-        const asn = parseInt(asnMatch[1]);
+        const asn = normalizeAsn(text);
 
         if (asn < 4242420000 || asn > 4242429999) {
             await ctx.reply(`${ICONS.error} Invalid ASN. DN42 range: 4242420000-4242429999`);
@@ -803,6 +818,8 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                     challengeStore.delete(userId);
                     ctx.session.asn = asn;
                     ctx.session.person = mntBy;
+                    // Persist telegramId → users table (non-blocking)
+                    registerUserTelegramId(asn, userId).then(() => { ctx.session._registered = true; }).catch(() => {});
                     await ctx.reply(
                         `${ICONS.success} *Signature verified successfully!*\n` +
                         `${ICONS.success} *签名验证成功！*\n\n` +
@@ -822,6 +839,8 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                     challengeStore.delete(userId);
                     ctx.session.asn = asn;
                     ctx.session.person = mntBy;
+                    // Persist telegramId → users table (non-blocking)
+                    registerUserTelegramId(asn, userId).then(() => { ctx.session._registered = true; }).catch(() => {});
                     await ctx.reply(
                         `${ICONS.success} *Signature verified successfully!*\n` +
                         `${ICONS.success} *签名验证成功！*\n\n` +
@@ -856,6 +875,8 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                     challengeStore.delete(userId);
                     ctx.session.asn = asn;
                     ctx.session.person = mntBy;
+                    // Persist telegramId → users table (non-blocking)
+                    registerUserTelegramId(asn, userId).then(() => { ctx.session._registered = true; }).catch(() => {});
                     await ctx.reply(
                         `${ICONS.success} *Signature verified successfully!*\n` +
                         `${ICONS.success} *签名验证成功！*\n\n` +

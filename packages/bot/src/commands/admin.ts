@@ -2,7 +2,14 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
-import { calculatePort } from './peer/validators';
+import { calculatePort, normalizeAsn, isAsnInput } from './peer/validators';
+
+/**
+ * Escape Telegram Markdown v1 special characters in user-supplied text.
+ */
+function escapeMarkdown(text: string): string {
+    return text.replace(/([*_`\[])/g, '\\$1');
+}
 
 /**
  * API client for moenet-core
@@ -125,6 +132,323 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
     });
 
     /**
+     * /approve <ASN or uuid> - Approve a pending session via text command
+     */
+    bot.command('approve', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.reply('❌ Admin access required.');
+            return;
+        }
+
+        const args = ctx.match?.trim().split(/\s+/) || [];
+        if (!args[0]) {
+            await ctx.reply(
+                `✅ *Approve Peer 批准 Peer*\n\n` +
+                `Usage 用法:\n` +
+                `• \`/approve <ASN>\` — approve by ASN\n` +
+                `• \`/approve <uuid>\` — approve by session ID\n\n` +
+                `Use /pending to list pending peers\n` +
+                `使用 /pending 查看待审批列表`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        const input = args[0];
+        const isAsn = isAsnInput(input);
+
+        try {
+            if (isAsn) {
+                // ASN lookup — find pending sessions for this ASN
+                const asn = normalizeAsn(input);
+                const listResult = await apiRequest('/admin', 'POST', {
+                    action: 'enumSessions',
+                    status: 3, // PENDING_REVIEW
+                    asn,
+                }, config.apiToken);
+
+                const sessions = listResult.data?.sessions || [];
+                if (sessions.length === 0) {
+                    await ctx.reply(`❌ No pending sessions for AS${asn}\n未找到 AS${asn} 的待审批请求`);
+                    return;
+                }
+
+                if (sessions.length === 1) {
+                    // Single match — approve directly
+                    const s = sessions[0] as SessionInfo;
+                    const result = await apiRequest('/admin', 'POST', {
+                        action: 'approveSession',
+                        uuid: s.uuid,
+                    }, config.apiToken);
+
+                    if (result.code !== 0) {
+                        await ctx.reply(`❌ ${result.message}`);
+                        return;
+                    }
+
+                    await ctx.reply(
+                        `✅ *Peer Approved 已批准*\n\n` +
+                        `ASN: \`AS${asn}\`\n` +
+                        `Node: \`${s.routerName || s.router}\`\n\n` +
+                        `Peer will be deployed on next agent sync.\n` +
+                        `Peer 将在下次 Agent 同步时部署。`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    return;
+                }
+
+                // Multiple matches — show selection with buttons
+                let message = `📋 *Multiple pending sessions for AS${asn}*\n` +
+                    `AS${asn} 有多个待审批请求，请选择:\n\n`;
+
+                const keyboard = new InlineKeyboard();
+                sessions.forEach((s: SessionInfo, i: number) => {
+                    const endpoint = s.ipv4EndpointAddress || s.ipv6EndpointAddress || 'N/A';
+                    message += `*${i + 1}. ${s.routerName || s.router}*\n`;
+                    message += `   Endpoint: \`${endpoint}\`\n\n`;
+
+                    keyboard
+                        .text(`✅ ${i + 1}`, `approve:${s.uuid}`)
+                        .text(`❌ ${i + 1}`, `reject:${s.uuid}`)
+                        .row();
+                });
+
+                await ctx.reply(message, { parse_mode: 'Markdown', reply_markup: keyboard });
+            } else {
+                // UUID or partial UUID — approve directly
+                const result = await apiRequest('/admin', 'POST', {
+                    action: 'approveSession',
+                    uuid: input,
+                }, config.apiToken);
+
+                if (result.code !== 0) {
+                    await ctx.reply(`❌ ${result.message}`);
+                    return;
+                }
+
+                await ctx.reply(
+                    `✅ *Peer Approved 已批准*\n\n` +
+                    `ID: \`${input}\`\n\n` +
+                    `Peer will be deployed on next agent sync.\n` +
+                    `Peer 将在下次 Agent 同步时部署。`,
+                    { parse_mode: 'Markdown' }
+                );
+            }
+        } catch (error) {
+            console.error('[Approve] Error:', error);
+            await ctx.reply('❌ Approval failed.');
+        }
+    });
+
+    /**
+     * /reject <ASN or uuid> [reason] - Reject a pending session via text command
+     */
+    bot.command('reject', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.reply('❌ Admin access required.');
+            return;
+        }
+
+        const args = ctx.match?.trim().split(/\s+/) || [];
+        if (!args[0]) {
+            await ctx.reply(
+                `❌ *Reject Peer 拒绝 Peer*\n\n` +
+                `Usage 用法:\n` +
+                `• \`/reject <ASN> [reason]\`\n` +
+                `• \`/reject <uuid> [reason]\`\n\n` +
+                `Use /pending to list pending peers\n` +
+                `使用 /pending 查看待审批列表`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        const input = args[0];
+        const reason = args.slice(1).join(' ') || 'Rejected by admin';
+        const isAsn = isAsnInput(input);
+
+        try {
+            let targetUuid = input;
+
+            if (isAsn) {
+                // ASN lookup — find pending session
+                const asn = normalizeAsn(input);
+                const listResult = await apiRequest('/admin', 'POST', {
+                    action: 'enumSessions',
+                    status: 3,
+                    asn,
+                }, config.apiToken);
+
+                const sessions = listResult.data?.sessions || [];
+                if (sessions.length === 0) {
+                    await ctx.reply(`❌ No pending sessions for AS${asn}\n未找到 AS${asn} 的待审批请求`);
+                    return;
+                }
+
+                if (sessions.length > 1) {
+                    // Multiple — show selection
+                    let message = `📋 *Multiple pending sessions for AS${asn}*\n请选择要拒绝的:\n\n`;
+                    const keyboard = new InlineKeyboard();
+                    sessions.forEach((s: SessionInfo, i: number) => {
+                        message += `*${i + 1}. ${s.routerName || s.router}*\n\n`;
+                        keyboard.text(`❌ ${i + 1}`, `reject:${s.uuid}`).row();
+                    });
+                    await ctx.reply(message, { parse_mode: 'Markdown', reply_markup: keyboard });
+                    return;
+                }
+
+                targetUuid = (sessions[0] as SessionInfo).uuid;
+            }
+
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'rejectSession',
+                uuid: targetUuid,
+                reason,
+            }, config.apiToken);
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ ${result.message}`);
+                return;
+            }
+
+            await ctx.reply(
+                `❌ *Peer Rejected 已拒绝*\n\n` +
+                `ID: \`${targetUuid.slice(0, 8)}...\`\n` +
+                `Reason: ${reason}`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('[Reject] Error:', error);
+            await ctx.reply('❌ Rejection failed.');
+        }
+    });
+
+    /**
+     * /sessions [status] - List BGP sessions with optional status filter
+     */
+    bot.command('sessions', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.reply('❌ Admin access required.');
+            return;
+        }
+
+        const statusArg = ctx.match?.trim().toLowerCase() || '';
+
+        // Status name → code mapping
+        const statusMap: Record<string, number> = {
+            disabled: 1, active: 2, enabled: 2,
+            pending: 3, review: 3,
+            queued: 4, setup: 4,
+            delete: 5,
+            problem: 6, error: 6,
+            teardown: 7,
+            rejected: 8,
+        };
+
+        // Status code → display name mapping
+        const statusNames: Record<number, string> = {
+            1: '⚫ Disabled', 2: '🟢 Active',
+            3: '🟡 Pending', 4: '🔵 Queued',
+            5: '🗑️ Deleting', 6: '🔴 Problem',
+            7: '⏳ Teardown', 8: '❌ Rejected',
+        };
+
+        try {
+            if (!statusArg || statusArg === 'summary') {
+                // Summary mode — show counts per status
+                const result = await apiRequest('/admin', 'POST', {
+                    action: 'enumSessions',
+                }, config.apiToken);
+
+                if (result.code !== 0) {
+                    await ctx.reply(`❌ Error: ${result.message}`);
+                    return;
+                }
+
+                const sessions = result.data?.sessions || [];
+                const counts: Record<number, number> = {};
+                for (const s of sessions as SessionInfo[]) {
+                    const st = s.status ?? 0;
+                    counts[st] = (counts[st] || 0) + 1;
+                }
+
+                let message = `📊 *Session Summary 会话概览*\n\n`;
+                message += `Total 总计: *${sessions.length}*\n\n`;
+
+                for (const [code, name] of Object.entries(statusNames)) {
+                    const count = counts[Number(code)] || 0;
+                    if (count > 0) {
+                        message += `${name}: ${count}\n`;
+                    }
+                }
+
+                message += `\n_Use_ \`/sessions all\` _to list all_\n`;
+                message += `_Use_ \`/sessions active\` _to filter_\n`;
+                message += `\n可用过滤: active, pending, disabled, problem, rejected`;
+
+                await ctx.reply(message, { parse_mode: 'Markdown' });
+                return;
+            }
+
+            // Filter mode
+            const filterBody: { action: string; status?: number } = { action: 'enumSessions' };
+            if (statusArg !== 'all') {
+                const statusCode = statusMap[statusArg];
+                if (statusCode === undefined) {
+                    await ctx.reply(
+                        `❌ Unknown status: \`${statusArg}\`\n\n` +
+                        `Available filters 可用过滤:\n` +
+                        `active, pending, disabled, problem, rejected, queued, teardown, all`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    return;
+                }
+                filterBody.status = statusCode;
+            }
+
+            const result = await apiRequest('/admin', 'POST', filterBody, config.apiToken);
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Error: ${result.message}`);
+                return;
+            }
+
+            const sessions = result.data?.sessions || [];
+
+            if (sessions.length === 0) {
+                const label = statusArg === 'all' ? 'any status' : statusArg;
+                await ctx.reply(`✅ No sessions with status: ${label}\n没有 ${label} 状态的会话`);
+                return;
+            }
+
+            // Cap at 30 to avoid Telegram message length limit
+            const displaySessions = (sessions as SessionInfo[]).slice(0, 30);
+            const filterLabel = statusArg === 'all' ? 'All' : statusArg.charAt(0).toUpperCase() + statusArg.slice(1);
+
+            let message = `📋 *Sessions — ${filterLabel} (${sessions.length})*\n\n`;
+
+            for (const s of displaySessions) {
+                const statusLabel = statusNames[s.status ?? 0] || `Status ${s.status}`;
+                const shortId = s.uuid.slice(0, 8);
+                const endpoint = s.ipv4EndpointAddress || s.ipv6EndpointAddress || 'N/A';
+
+                message += `*AS${s.asn}* → ${s.routerName || s.router}\n`;
+                message += `   ${statusLabel} | \`${shortId}…\`\n`;
+                message += `   Endpoint: \`${endpoint}\`\n\n`;
+            }
+
+            if (sessions.length > 30) {
+                message += `\n_…and ${sessions.length - 30} more_`;
+            }
+
+            await ctx.reply(message, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('[Sessions] Error:', error);
+            await ctx.reply('❌ Failed to fetch sessions.');
+        }
+    });
+
+    /**
      * /nodes - List all nodes
      */
     bot.command('nodes', async (ctx) => {
@@ -199,7 +523,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         }
 
         const asnStr = args[0] || '';
-        const asn = parseInt(asnStr.replace(/^AS/i, ''), 10);
+        const asn = normalizeAsn(asnStr);
 
         if (isNaN(asn)) {
             await ctx.reply('❌ Invalid ASN format');
@@ -450,6 +774,199 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         const { showServerWgInfo } = await import('./peer/ui');
         await showServerWgInfo(ctx);
     });
+
+    /**
+     * /announce <message> - Broadcast announcement to all peer users
+     */
+    bot.command('announce', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.reply('❌ Admin access required.');
+            return;
+        }
+
+        const message = ctx.match?.trim();
+        if (!message) {
+            await ctx.reply(
+                `📢 *Announce 公告*\n\n` +
+                `Usage 用法:\n` +
+                `• \`/announce <message>\`\n\n` +
+                `Sends the message to all users with active peers.\n` +
+                `向所有有活跃 Peer 的用户发送消息。`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        await ctx.reply('📢 Sending announcement...\n正在发送公告...');
+
+        try {
+            // Get all notification targets
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'getNotificationTargets',
+            }, config.apiToken);
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Failed to get targets: ${result.message}`);
+                return;
+            }
+
+            const targets = (result.data as unknown as { targets: NotificationTarget[] })?.targets || [];
+
+            if (targets.length === 0) {
+                await ctx.reply('ℹ️ No users with registered Telegram IDs found.\n未找到已注册 Telegram ID 的用户。');
+                return;
+            }
+
+            const adminTgId = ctx.from?.id;
+            let sent = 0;
+            let failed = 0;
+            const failedAsns: number[] = [];
+
+            for (const target of targets) {
+                // Skip sending to admin themselves
+                if (target.telegramId === adminTgId) continue;
+
+                try {
+                    await ctx.api.sendMessage(
+                        target.telegramId,
+                        `📢 *MoeNet Announcement 公告*\n\n${escapeMarkdown(message)}`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    sent++;
+                } catch (error) {
+                    console.error(`[Announce] Failed to send to AS${target.asn} (tgId: ${target.telegramId}):`, error);
+                    failed++;
+                    failedAsns.push(target.asn);
+                }
+            }
+
+            let report = `📢 *Announcement Report 公告报告*\n\n` +
+                `✅ Sent 已发送: ${sent}\n` +
+                `❌ Failed 失败: ${failed}\n` +
+                `👥 Total targets 目标总数: ${targets.length}`;
+
+            if (failedAsns.length > 0) {
+                report += `\n\nFailed ASNs 失败的 ASN: ${failedAsns.map(a => `AS${a}`).join(', ')}`;
+            }
+
+            await ctx.reply(report, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error('[Announce] Error:', error);
+            await ctx.reply('❌ Announcement failed.');
+        }
+    });
+
+    /**
+     * /notify <ASN,...> <message> - Send notification to specific ASN users
+     */
+    bot.command('notify', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.reply('❌ Admin access required.');
+            return;
+        }
+
+        const args = ctx.match?.trim() || '';
+        if (!args) {
+            await ctx.reply(
+                `🔔 *Notify 通知*\n\n` +
+                `Usage 用法:\n` +
+                `• \`/notify <ASN> <message>\` — single user\n` +
+                `• \`/notify <ASN1,ASN2,...> <message>\` — multiple users\n\n` +
+                `Example 示例:\n` +
+                `\`/notify 0998 Your tunnel is down\`\n` +
+                `\`/notify 0998,1234 Maintenance tonight\``,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        // Parse: first token = ASN(s), rest = message
+        const spaceIdx = args.indexOf(' ');
+        if (spaceIdx === -1) {
+            await ctx.reply('❌ Missing message. Usage: `/notify <ASN> <message>`', { parse_mode: 'Markdown' });
+            return;
+        }
+
+        const asnPart = args.slice(0, spaceIdx);
+        const message = args.slice(spaceIdx + 1).trim();
+
+        if (!message) {
+            await ctx.reply('❌ Message cannot be empty.\n消息不能为空。');
+            return;
+        }
+
+        // Parse ASN list (comma-separated, supports short form like 0998)
+        const asns = asnPart.split(',').map(s => normalizeAsn(s.trim())).filter(n => !isNaN(n));
+
+        if (asns.length === 0) {
+            await ctx.reply('❌ Invalid ASN format.\n无效的 ASN 格式。');
+            return;
+        }
+
+        try {
+            // Get notification targets for specific ASNs
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'getNotificationTargets',
+                asns,
+            }, config.apiToken);
+
+            if (result.code !== 0) {
+                await ctx.reply(`❌ Failed to get targets: ${result.message}`);
+                return;
+            }
+
+            const targets = (result.data as unknown as { targets: NotificationTarget[] })?.targets || [];
+
+            if (targets.length === 0) {
+                const asnList = asns.map(a => `AS${a}`).join(', ');
+                await ctx.reply(
+                    `❌ No registered users found for: ${asnList}\n` +
+                    `未找到这些 ASN 的已注册用户。\n\n` +
+                    `Users must have logged in via /login to receive notifications.\n` +
+                    `用户需要通过 /login 登录过才能接收通知。`
+                );
+                return;
+            }
+
+            let sent = 0;
+            let failed = 0;
+            const results: string[] = [];
+
+            for (const target of targets) {
+                try {
+                    await ctx.api.sendMessage(
+                        target.telegramId,
+                        `🔔 *MoeNet Notification 通知*\n\n${escapeMarkdown(message)}`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    sent++;
+                    results.push(`✅ AS${target.asn}`);
+                } catch (error) {
+                    console.error(`[Notify] Failed to send to AS${target.asn}:`, error);
+                    failed++;
+                    results.push(`❌ AS${target.asn}`);
+                }
+            }
+
+            // Check for ASNs that had no targets
+            const targetedAsns = new Set(targets.map(t => t.asn));
+            for (const asn of asns) {
+                if (!targetedAsns.has(asn)) {
+                    results.push(`⚠️ AS${asn} (no Telegram ID)`);
+                }
+            }
+
+            await ctx.reply(
+                `🔔 *Notification Report 通知报告*\n\n` +
+                `${results.join('\n')}\n\n` +
+                `Sent 已发送: ${sent} | Failed 失败: ${failed}`,
+                { parse_mode: 'Markdown' }
+            );
+        } catch (error) {
+            console.error('[Notify] Error:', error);
+            await ctx.reply('❌ Notification failed.');
+        }
+    });
 }
 
 /**
@@ -539,8 +1056,14 @@ interface SessionInfo {
     uuid: string;
     asn: number;
     router: string;
+    routerName?: string;
     ipv4EndpointAddress?: string;
     ipv6EndpointAddress?: string;
+    ipv6?: string;
+    endpoint?: string;
+    contact?: string;
+    status?: number;
+    createdAt?: string;
 }
 
 interface RouterInfo {
@@ -559,4 +1082,9 @@ interface RouterInfo {
     supportsIpv6?: boolean;
     provider?: string;
     allowCnPeers?: boolean;
+}
+
+interface NotificationTarget {
+    asn: number;
+    telegramId: number;
 }

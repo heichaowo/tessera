@@ -12,6 +12,7 @@ export enum PeeringStatus {
     QUEUED_FOR_DELETE = 5,
     PROBLEM = 6,
     TEARDOWN = 7,
+    REJECTED = 8,
 }
 
 /**
