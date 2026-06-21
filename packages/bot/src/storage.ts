@@ -10,7 +10,7 @@ let redisClient: Redis | null = null;
 /**
  * Get or create Redis client
  */
-function getRedisClient(): Redis | null {
+export function getRedisClient(): Redis | null {
     // Enable Redis when URL is explicitly set (not the default localhost)
     const redisUrl = config.redisUrl;
     if (!redisUrl || redisUrl === 'redis://localhost:6379') {

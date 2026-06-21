@@ -1317,7 +1317,7 @@ async function getNotificationTargets(
             telegramId: u.get('telegramId') as number,
         }));
 
-        // For ASNs not in users table, try to find email contacts from bgp_sessions
+        // For ASNs not in users table, try to resolve via bgp_sessions.contact
         const foundAsns = new Set(targets.map(t => t.asn));
         const missingAsns = targetAsns.filter(a => !foundAsns.has(a));
 
@@ -1332,14 +1332,41 @@ async function getNotificationTargets(
                 group: ['asn', 'contact'],
             });
 
+            const redis = getRedis();
+
             for (const s of sessions) {
                 const contact = (s.get('contact') as string || '').trim();
-                // Extract email addresses from contact field
-                if (contact.includes('@') && !contact.startsWith('@') && !contact.startsWith('telegram:')) {
-                    emailFallbacks.push({
-                        asn: s.get('asn') as number,
-                        email: contact,
-                    });
+                const asn = s.get('asn') as number;
+
+                // Already resolved this ASN
+                if (foundAsns.has(asn)) continue;
+
+                // Try to resolve @username via Redis cache
+                let username: string | null = null;
+                if (contact.startsWith('@')) {
+                    username = contact.slice(1).toLowerCase();
+                } else if (contact.toLowerCase().startsWith('telegram:')) {
+                    // "telegram: @username" or "Telegram: @abc123"
+                    const match = contact.match(/@(\w+)/);
+                    if (match?.[1]) username = match[1].toLowerCase();
+                }
+
+                if (username) {
+                    try {
+                        const cachedId = await redis.get(`tg:username:${username}`);
+                        if (cachedId) {
+                            targets.push({ asn, telegramId: Number(cachedId) });
+                            foundAsns.add(asn);
+                            continue;
+                        }
+                    } catch {
+                        // Redis unavailable, skip
+                    }
+                }
+
+                // Email fallback: contact contains @ but is not a telegram username
+                if (contact.includes('@') && !contact.startsWith('@') && !contact.toLowerCase().startsWith('telegram:')) {
+                    emailFallbacks.push({ asn, email: contact });
                 }
             }
         }

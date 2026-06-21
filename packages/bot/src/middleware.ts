@@ -3,6 +3,7 @@
  */
 import type { Context, NextFunction } from 'grammy';
 import config from './config';
+import { getRedisClient } from './storage';
 
 /**
  * Rate limit tracking per user
@@ -149,6 +150,26 @@ export function autoRegisterMiddleware<C extends Context & { session: { asn?: nu
             });
         }
 
+        return next();
+    };
+}
+
+/**
+ * Username→ID cache middleware.
+ * Stores every interacting user's @username→numeric_id mapping in Redis
+ * so the notification system can resolve @username contacts to chat IDs.
+ */
+export function usernameCacheMiddleware<C extends Context>() {
+    return async (ctx: C, next: NextFunction) => {
+        const user = ctx.from;
+        if (user?.username && user.id) {
+            const redis = getRedisClient();
+            if (redis) {
+                // Fire-and-forget: cache username→id with 90-day TTL
+                const key = `tg:username:${user.username.toLowerCase()}`;
+                redis.set(key, String(user.id), 'EX', 86400 * 90).catch(() => {});
+            }
+        }
         return next();
     };
 }

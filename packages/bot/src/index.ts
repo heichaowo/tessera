@@ -2,7 +2,7 @@ import { Bot, Context, session, type SessionFlavor, webhookCallback } from 'gram
 import { Hono } from 'hono';
 import { registerCommands } from './commands';
 import config from './config';
-import { rateLimitMiddleware, metricsMiddleware, autoRegisterMiddleware, getMetricsSummary } from './middleware';
+import { rateLimitMiddleware, metricsMiddleware, autoRegisterMiddleware, usernameCacheMiddleware, getMetricsSummary } from './middleware';
 import { createRedisStorage } from './storage';
 
 /**
@@ -97,6 +97,9 @@ export function createBot(): Bot<BotContext> {
 
     // Rate limiting middleware
     bot.use(rateLimitMiddleware());
+
+    // Cache username→id mapping for notification resolution
+    bot.use(usernameCacheMiddleware());
 
     // Auto-register middleware — backfills (asn, telegramId) for existing users
     bot.use(autoRegisterMiddleware(config.apiUrl, config.apiToken));
