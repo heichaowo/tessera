@@ -740,20 +740,39 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                             const nodeResult = await apiRequest('/admin', 'POST', { action: 'enumRouters' }, config.apiToken);
                             const nodes = nodeResult.data?.routers;
                             if (nodeResult.code === 0 && Array.isArray(nodes)) {
+                                // Check if user's current endpoint is a China IP
+                                let userIsChinaIp = false;
+                                const userEndpoint = flow.current?.endpoint as string | undefined;
+                                if (userEndpoint) {
+                                    try {
+                                        const host = userEndpoint.split(':')[0] || userEndpoint;
+                                        const ip = await resolveEndpoint(host);
+                                        if (ip && isChinaIP(ip)) userIsChinaIp = true;
+                                    } catch { /* ignore resolve errors */ }
+                                }
+
                                 const nodeButtons: { text: string }[][] = [];
                                 for (const node of [...nodes].sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name))) {
-                                    if (node.isOpen !== false && node.uuid !== flow.sessionUuid) {
-                                        nodeButtons.push([{ text: `📍 ${node.name} (${node.location || 'Unknown'})` }]);
-                                    }
+                                    // Skip current node, closed nodes, and CN-restricted nodes for CN users
+                                    if (node.isOpen === false) continue;
+                                    if (node.uuid === flow.sessionUuid) continue;
+                                    if (userIsChinaIp && node.allowCnPeers === false) continue;
+                                    nodeButtons.push([{ text: `📍 ${node.name} (${node.location || 'Unknown'})` }]);
                                 }
                                 nodeButtons.push([{ text: '🔙 Back' }]);
 
                                 // Set step for selection
                                 ctx.session.peerFlow = { ...flow, step: 'modify_region' };
 
+                                let warning = '';
+                                if (userIsChinaIp) {
+                                    warning = '\n⚠️ Nodes that block CN IPs are hidden.\n不允许中国大陆 IP 的节点已隐藏。\n';
+                                }
+
                                 await ctx.reply(
                                     '🌍 *Migrate to Another Node*\n迁移到另一节点\n\n' +
-                                    '⚠️ This will recreate your peer.\n这将重建你的 Peer。\n\n' +
+                                    '⚠️ This will recreate your peer.\n这将重建你的 Peer。\n' +
+                                    warning + '\n' +
                                     'Select new node:\n选择新节点:',
                                     { parse_mode: 'Markdown', reply_markup: { keyboard: nodeButtons, resize_keyboard: true } }
                                 );
@@ -942,12 +961,26 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                             `✅ *Changes submitted \& migration initiated!*\n` +
                             `修改已提交，迁移已启动！\n\n` +
                             `From: \`${flow.routerName}\` → To: \`${flow.pendingMigration!.nodeName}\`\n\n` +
-                            `Peer will be automatically recreated on the new node.\n` +
-                            `Peer 将在新节点上自动重建。\n\n` +
-                            `⏳ Please wait a few minutes for changes to apply.\n` +
-                            `请等待几分钟让更改生效。`,
+                            `⏳ Peer is being recreated on the new node.\n` +
+                            `Peer 正在新节点上重建。\n\n` +
+                            `You will be notified when it's ready.\n` +
+                            `就绪后会通知你。\n\n` +
+                            `Use \`/info\` to check your new WG config.\n` +
+                            `使用 \`/info\` 查看新的 WG 配置信息。`,
                             { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
                         );
+
+                        // Store deferred migration notification
+                        const asn = flow.isAdminMode ? flow.targetAsn : ctx.session.asn;
+                        if (asn) {
+                            await apiRequest('/admin', 'POST', {
+                                action: 'storeMigrationNotify',
+                                asns: [asn],
+                                fromRouter: flow.routerName || 'Unknown',
+                                toRouter: flow.pendingMigration!.nodeName,
+                                adminChatId: undefined, // Self-service, no admin chat
+                            }, config.apiToken);
+                        }
                     } else {
                         await ctx.reply(
                             `✅ Modification submitted successfully!\n` +
