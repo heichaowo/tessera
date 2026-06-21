@@ -1277,10 +1277,10 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 }
             }
 
-            // Check for ASNs that had no targets
-            const targetedAsns = new Set(targets.map(t => t.asn));
+            // Check for ASNs that had no targets (use Number() to avoid type mismatch)
+            const targetedAsns = new Set(targets.map(t => Number(t.asn)));
             for (const asn of asns) {
-                if (!targetedAsns.has(asn)) {
+                if (!targetedAsns.has(Number(asn))) {
                     results.push(`⚠️ AS${asn} (no Telegram ID)`);
                 }
             }
