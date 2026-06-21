@@ -976,7 +976,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         await ctx.editMessageText(preview, { parse_mode: 'Markdown', reply_markup: keyboard });
     }
 
-    // Handle send confirm
+    // Handle send confirm (also used by retry)
     bot.callbackQuery('ann:send', async (ctx) => {
         if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
         await ctx.answerCallbackQuery('Sending...');
@@ -1004,58 +1004,159 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         const tgTargets = (data?.targets || []) as NotificationTarget[];
         const emailTargets = (data?.emailFallbacks || []) as Array<{ asn: number; email: string }>;
 
+        const sendResult = await executeSend(ctx, flow.message, tgTargets, emailTargets);
+        await showSendReport(ctx, sendResult, flow);
+    });
+
+    // Handle retry - only re-send failed items
+    bot.callbackQuery('ann:retry', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery('Retrying...');
+
+        const flow = ctx.session.announceFlow;
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+
+        const retryTg = (flow.failedTg || []) as NotificationTarget[];
+        const retryEmail = (flow.failedEmail || []) as Array<{ asn: number; email: string }>;
+
+        if (retryTg.length === 0 && retryEmail.length === 0) {
+            await ctx.editMessageText('✅ No failed items to retry.\n没有需要重试的项。');
+            return;
+        }
+
+        await ctx.editMessageText('🔄 Retrying failed items...\n正在重试失败项...');
+
+        const sendResult = await executeSend(ctx, flow.message, retryTg, retryEmail);
+        await showSendReport(ctx, sendResult, flow, true);
+    });
+
+    /**
+     * Execute the actual send: TG + Email, return categorized results.
+     */
+    async function executeSend(
+        ctx: BotContext,
+        message: string,
+        tgTargets: NotificationTarget[],
+        emailTargets: Array<{ asn: number; email: string }>,
+    ) {
         const adminTgId = ctx.from?.id;
         let tgSent = 0;
-        let tgFailed = 0;
-        const failedAsns: number[] = [];
+        const failedTg: NotificationTarget[] = [];
 
-        // Send TG messages
         for (const target of tgTargets) {
             if (target.telegramId === adminTgId) continue;
             try {
                 await ctx.api.sendMessage(
                     target.telegramId,
-                    `📢 *MoeNet Announcement 公告*\n\n${escapeMarkdown(flow.message)}`,
+                    `📢 *MoeNet Announcement 公告*\n\n${escapeMarkdown(message)}`,
                     { parse_mode: 'Markdown' }
                 );
                 tgSent++;
             } catch (error) {
                 console.error(`[Announce] TG failed AS${target.asn}:`, error);
-                tgFailed++;
-                failedAsns.push(target.asn);
+                failedTg.push(target);
             }
         }
 
-        // Send emails via API
         let emailSent = 0;
-        let emailFailed = 0;
+        const failedEmail: Array<{ asn: number; email: string }> = [];
+
         if (emailTargets.length > 0) {
             const emailResult = await apiRequest('/admin', 'POST', {
                 action: 'sendBulkEmail',
-                message: flow.message,
+                message,
                 targets: emailTargets,
             }, config.apiToken);
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const emailData = emailResult.data as any;
             emailSent = emailData?.sent || 0;
-            emailFailed = emailData?.failed || 0;
+            const emailErrors = (emailData?.errors || []) as Array<{ asn: number; error: string }>;
+
+            // Match failed ASNs back to email targets
+            const failedAsnSet = new Set(emailErrors.map((e: { asn: number }) => e.asn));
+            for (const t of emailTargets) {
+                if (failedAsnSet.has(t.asn)) {
+                    failedEmail.push(t);
+                }
+            }
         }
 
-        // Report
-        let report = `📢 *Announcement Report 公告报告*\n\n` +
-            `📱 TG: ✅ ${tgSent} sent, ❌ ${tgFailed} failed\n` +
-            `📧 Email: ✅ ${emailSent} sent, ❌ ${emailFailed} failed\n` +
+        return { tgSent, emailSent, failedTg, failedEmail };
+    }
+
+    /**
+     * Show categorized send report with retry button if there are failures.
+     */
+    async function showSendReport(
+        ctx: BotContext,
+        result: { tgSent: number; emailSent: number; failedTg: NotificationTarget[]; failedEmail: Array<{ asn: number; email: string }> },
+        flow: NonNullable<BotContext['session']['announceFlow']>,
+        isRetry = false,
+    ) {
+        const { tgSent, emailSent, failedTg, failedEmail } = result;
+        const totalFailed = failedTg.length + failedEmail.length;
+        const prefix = isRetry ? '🔄 *Retry Report 重试报告*' : '📢 *Announcement Report 公告报告*';
+
+        let report = `${prefix}\n\n` +
+            `📱 TG: ✅ ${tgSent} sent, ❌ ${failedTg.length} failed\n` +
+            `📧 Email: ✅ ${emailSent} sent, ❌ ${failedEmail.length} failed\n` +
             `👥 Total reached 总到达: *${tgSent + emailSent}*`;
 
-        if (failedAsns.length > 0) {
-            report += `\n\nTG failed: ${failedAsns.map(a => `AS${a}`).join(', ')}`;
+        // Categorized failure details
+        if (totalFailed > 0) {
+            // Find ASNs that failed on BOTH channels
+            const tgFailedAsns = new Set(failedTg.map(t => t.asn));
+            const emailFailedAsns = new Set(failedEmail.map(t => t.asn));
+            const bothFailed = [...tgFailedAsns].filter(a => emailFailedAsns.has(a));
+            const tgOnlyFailed = failedTg.filter(t => !emailFailedAsns.has(t.asn));
+            const emailOnlyFailed = failedEmail.filter(t => !tgFailedAsns.has(t.asn));
+
+            report += `\n\n*Failures 失败详情:*`;
+
+            if (bothFailed.length > 0) {
+                report += `\n🔴 Both TG+Email 双通道失败:`;
+                for (const asn of bothFailed) {
+                    report += `\n  • AS${asn}`;
+                }
+            }
+            if (tgOnlyFailed.length > 0) {
+                report += `\n📱 TG only TG失败:`;
+                for (const t of tgOnlyFailed) {
+                    report += `\n  • AS${t.asn} (id: ${t.telegramId})`;
+                }
+            }
+            if (emailOnlyFailed.length > 0) {
+                report += `\n📧 Email only 邮件失败:`;
+                for (const t of emailOnlyFailed) {
+                    report += `\n  • AS${t.asn} (${t.email})`;
+                }
+            }
         }
 
-        await ctx.editMessageText(report, { parse_mode: 'Markdown' });
+        // Store failures in session for retry
+        if (totalFailed > 0) {
+            ctx.session.announceFlow = { ...flow, failedTg, failedEmail };
 
-        // Clear session
+            const keyboard = new InlineKeyboard()
+                .text(`🔄 Retry ${totalFailed} failed 重试失败项`, 'ann:retry')
+                .text('✅ Done 完成', 'ann:done:dismiss');
+
+            await ctx.editMessageText(report, { parse_mode: 'Markdown', reply_markup: keyboard });
+        } else {
+            // All succeeded - clean up
+            ctx.session.announceFlow = undefined;
+            await ctx.editMessageText(report, { parse_mode: 'Markdown' });
+        }
+    }
+
+    // Handle dismiss (after retry or done)
+    bot.callbackQuery('ann:done:dismiss', async (ctx) => {
+        await ctx.answerCallbackQuery('Done');
         ctx.session.announceFlow = undefined;
+        // Remove the retry button but keep the report text
+        const text = ctx.callbackQuery.message?.text || 'Done';
+        await ctx.editMessageText(text);
     });
 
     // Handle cancel

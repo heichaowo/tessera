@@ -83,6 +83,10 @@ interface SessionData {
         routerNames: string[];
         /** Router UUIDs selected for targeted announce. Empty = all. */
         selectedRouters?: string[];
+        /** Failed TG targets for retry */
+        failedTg?: Array<{ asn: number; telegramId: number }>;
+        /** Failed email targets for retry */
+        failedEmail?: Array<{ asn: number; email: string }>;
     };
     /** Set to true after telegramId has been registered to DB for this session */
     _registered?: boolean;
