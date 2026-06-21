@@ -67,28 +67,37 @@ export function registerConfirmHandlers(bot: Bot<BotContext>) {
 
             await ctx.reply(successText, { parse_mode: 'Markdown' });
 
-            // Notify admin if not in admin mode
+            // Notify admin if not in admin mode (with retry for reliability)
             if (!flow.isAdminMode && config.adminChatId) {
-                try {
-                    const adminNotification =
-                        `🔔 *New Peer Request*\n新的 Peer 申请\n\n` +
-                        `🆔 ASN: \`AS${asn}\`\n` +
-                        `📍 Node: \`${flow.routerName}\`\n` +
-                        `🌐 IPv6: \`${flow.ipv6}\`\n` +
-                        `📡 Endpoint: ${flow.endpoint ? `\`${flow.endpoint}:${flow.port}\`` : 'NAT'}\n` +
-                        (flow.contact ? `📞 Contact: \`${flow.contact}\`\n` : '') +
-                        `\nUse /pending to review all`;
+                const adminNotification =
+                    `🔔 *New Peer Request*\n新的 Peer 申请\n\n` +
+                    `🆔 ASN: \`AS${asn}\`\n` +
+                    `📍 Node: \`${flow.routerName}\`\n` +
+                    `🌐 IPv6: \`${flow.ipv6}\`\n` +
+                    `📡 Endpoint: ${flow.endpoint ? `\`${flow.endpoint}:${flow.port}\`` : 'NAT'}\n` +
+                    (flow.contact ? `📞 Contact: \`${flow.contact}\`\n` : '') +
+                    `\nUse /pending to review all`;
 
-                    await ctx.api.sendMessage(config.adminChatId, adminNotification, {
-                        parse_mode: 'Markdown',
-                        reply_markup: new InlineKeyboard()
-                            .text('✅ Approve', `approve:${sessionUuid}`)
-                            .text('❌ Reject', `reject:${sessionUuid}`)
-                            .row()
-                            .text('📋 All Pending', 'admin:pending')
-                    });
-                } catch (e) {
-                    console.error('[Notify Admin] Error:', e);
+                const keyboard = new InlineKeyboard()
+                    .text('✅ Approve', `approve:${sessionUuid}`)
+                    .text('❌ Reject', `reject:${sessionUuid}`)
+                    .row()
+                    .text('📋 All Pending', 'admin:pending');
+
+                // Retry up to 3 times with backoff
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        await ctx.api.sendMessage(config.adminChatId, adminNotification, {
+                            parse_mode: 'Markdown',
+                            reply_markup: keyboard,
+                        });
+                        break; // Success
+                    } catch (e) {
+                        console.error(`[Notify Admin] Attempt ${attempt}/3 failed:`, e);
+                        if (attempt < 3) {
+                            await new Promise(r => setTimeout(r, attempt * 2000));
+                        }
+                    }
                 }
             }
 

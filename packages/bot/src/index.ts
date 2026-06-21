@@ -156,8 +156,6 @@ async function setBotCommands(bot: Bot<BotContext>) {
     if (config.adminChatId) {
         await bot.api.setMyCommands([
             { command: 'pending', description: 'Pending reviews 待审核' },
-            { command: 'approve', description: 'Approve session 批准' },
-            { command: 'reject', description: 'Reject session 拒绝' },
             { command: 'sessions', description: 'All sessions 所有会话' },
             { command: 'nodes', description: 'Node list 节点列表' },
             { command: 'addnode', description: 'Add router 添加节点' },
