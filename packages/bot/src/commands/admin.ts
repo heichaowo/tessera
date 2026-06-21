@@ -5,6 +5,7 @@ import config from '../config';
 import { apiRequest } from '../api';
 import { isAdmin } from '../guards';
 import { calculatePort, normalizeAsn, isAsnInput } from './peer/validators';
+import { fetchContacts } from '../services/dn42Registry';
 
 /**
  * Escape Telegram Markdown v1 special characters in user-supplied text.
@@ -992,6 +993,35 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         const data = result.data as any;
         const tgTargets = (data?.targets || []) as NotificationTarget[];
         const emailTargets = (data?.emailFallbacks || []) as Array<{ asn: number; email: string }>;
+        const allAsns = (data?.allAsns || []) as number[];
+
+        // Dynamic fallback: for ASNs with no contact at all, fetch from DN42 registry
+        const coveredAsns = new Set([
+            ...tgTargets.map(t => t.asn),
+            ...emailTargets.map(t => t.asn),
+        ]);
+        const unreachableAsns = allAsns.filter(a => !coveredAsns.has(a));
+
+        if (unreachableAsns.length > 0) {
+            for (const asn of unreachableAsns) {
+                try {
+                    const contacts = await fetchContacts(asn);
+                    // Find first email-like contact
+                    const email = contacts.find(c => c.includes('@') && !c.startsWith('@'));
+                    if (email) {
+                        emailTargets.push({ asn, email });
+                        // Backfill contact into the session for future use
+                        apiRequest('/admin', 'POST', {
+                            action: 'updateSessionContact',
+                            asn,
+                            contact: email,
+                        }, config.apiToken).catch(() => {});
+                    }
+                } catch {
+                    // Burble API unavailable, skip this ASN
+                }
+            }
+        }
 
         const sendResult = await executeSend(ctx, flow.message, tgTargets, emailTargets);
         await showSendReport(ctx, sendResult, flow);

@@ -141,6 +141,8 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await getNotificationTargets(c, body);
         case 'sendBulkEmail':
             return await sendBulkEmail(c, body);
+        case 'updateSessionContact':
+            return await updateSessionContact(c, body);
         case 'storeMigrationNotify':
             return await storeMigrationNotify(c, body);
         case 'checkMigrationNotify':
@@ -1549,10 +1551,45 @@ async function getNotificationTargets(
             }
         }
 
-        return success(c, { targets, emailFallbacks });
+        return success(c, { targets, emailFallbacks, allAsns: targetAsns });
     } catch (error) {
         console.error('[Admin] Error getting notification targets:', error);
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to get notification targets');
+    }
+}
+
+/**
+ * Backfill contact info for sessions belonging to a given ASN.
+ * Used by announce flow when dynamically fetching contacts from DN42 registry.
+ */
+async function updateSessionContact(
+    c: Context,
+    body: { asn?: number; contact?: string }
+): Promise<Response> {
+    const { asn, contact } = body;
+
+    if (asn == null || !contact) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing asn or contact');
+    }
+
+    const models = getModels();
+
+    try {
+        const [count] = await models.bgpSessions.update(
+            { contact },
+            {
+                where: {
+                    asn: Number(asn),
+                    contact: { [Op.or]: [null, ''] },
+                },
+            }
+        );
+
+        console.log(`[Admin] Backfilled contact for AS${asn}: ${contact} (${count} sessions)`);
+        return success(c, { updated: count });
+    } catch (error) {
+        console.error('[Admin] Error updating session contact:', error);
+        return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to update contact');
     }
 }
 
