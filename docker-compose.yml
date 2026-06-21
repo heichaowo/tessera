@@ -187,10 +187,20 @@ services:
 
 volumes:
   postgres_data:
+    external: true
+    name: moenet-core_postgres_data
   redis_data:
+    external: true
+    name: moenet-core_redis_data
   traefik_certs:
+    external: true
+    name: moenet-core_traefik_certs
   prometheus_data:
+    external: true
+    name: moenet-core_prometheus_data
   grafana_data:
+    external: true
+    name: moenet-core_grafana_data
 
 
 networks:
