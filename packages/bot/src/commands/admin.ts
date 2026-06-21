@@ -304,14 +304,25 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             }
         }
 
-        message += `\n🔔 Use /notify to inform affected users.\n` +
-            `使用 /notify 通知受影响的用户更新配置。`;
+        message += `\n⏳ Users will be notified automatically once new sessions are active.\n` +
+            `用户将在新会话激活后自动收到通知。`;
 
         await ctx.editMessageText(message, { parse_mode: 'Markdown' });
 
-        // Auto-notify migrated users with new endpoint info
+        // Store pending migration notifications in API (Redis-backed)
+        // Will be triggered when agent reports sessions as ENABLED
         if (migrated > 0) {
-            await notifyMigratedUsers(ctx, fromName, toName, results.filter(r => r.status === 'ok'));
+            const migratedAsns = results
+                .filter(r => r.status === 'ok')
+                .map(r => r.asn);
+
+            await apiRequest('/admin', 'POST', {
+                action: 'storeMigrationNotify',
+                asns: migratedAsns,
+                fromRouter: fromName,
+                toRouter: toName,
+                adminChatId: ctx.chat?.id,
+            }, config.apiToken);
         }
     });
 

@@ -155,12 +155,55 @@ async function listSessions(c: Context, user: JWTPayload): Promise<Response> {
     const asn = Number(user.asn);
 
     const sessions = await models.bgpSessions.findAll({
-        attributes: ['uuid', 'router', 'status', 'ipv4', 'ipv6', 'mtu', 'lastError', 'created_at'],
+        attributes: ['uuid', 'router', 'status', 'ipv4', 'ipv6', 'mtu', 'lastError', 'credential', 'created_at'],
         where: { asn },
     });
 
+    // Resolve router info for server endpoint display
+    const routerUuids = [...new Set(sessions.map(s => s.get('router') as string))];
+    const routers = routerUuids.length > 0 ? await models.routers.findAll({ where: { uuid: routerUuids } }) : [];
+    const routerMap = new Map(routers.map(r => [
+        r.get('uuid') as string,
+        {
+            name: r.get('name') as string,
+            publicIp: r.get('publicIp') as string | null,
+            publicIpv6: r.get('publicIpv6') as string | null,
+            wgPublicKey: r.get('wgPublicKey') as string | null,
+        }
+    ]));
+
     return success(c, {
-        sessions: sessions.map((s: { get: () => unknown }) => s.get()),
+        sessions: sessions.map((s: { get: (key?: string) => unknown }) => {
+            const raw = s.get() as Record<string, unknown>;
+            const routerInfo = routerMap.get(raw.router as string);
+
+            // Extract listen_port from credential JSON
+            let listenPort: number | null = null;
+            if (raw.credential && typeof raw.credential === 'string') {
+                try {
+                    const cred = JSON.parse(raw.credential);
+                    if (cred.listen_port) listenPort = cred.listen_port;
+                } catch { /* ignore parse errors */ }
+            }
+
+            // Build server endpoint
+            let serverEndpoint: string | null = null;
+            if (routerInfo?.publicIp && listenPort) {
+                serverEndpoint = `${routerInfo.publicIp}:${listenPort}`;
+            } else if (routerInfo?.publicIpv6 && listenPort) {
+                serverEndpoint = `[${routerInfo.publicIpv6}]:${listenPort}`;
+            }
+
+            // Don't expose raw credential to user, only server-side info
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { credential: _cred, ...sessionData } = raw;
+            return {
+                ...sessionData,
+                routerName: routerInfo?.name || raw.router,
+                serverEndpoint,
+                serverWgKey: routerInfo?.wgPublicKey || null,
+            };
+        }),
     });
 }
 

@@ -141,6 +141,10 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await getNotificationTargets(c, body);
         case 'sendBulkEmail':
             return await sendBulkEmail(c, body);
+        case 'storeMigrationNotify':
+            return await storeMigrationNotify(c, body);
+        case 'checkMigrationNotify':
+            return await checkMigrationNotify(c, body);
         default:
             return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
     }
@@ -1602,4 +1606,101 @@ async function sendBulkEmail(c: Context, body: {
 
     console.log(`[Admin] Bulk email: ${sent} sent, ${failed} failed`);
     return success(c, { sent, failed, errors });
+}
+
+/**
+ * Store pending migration notifications in Redis.
+ * One key per ASN with 24h TTL.
+ */
+async function storeMigrationNotify(c: Context, body: {
+    asns?: number[];
+    fromRouter?: string;
+    toRouter?: string;
+    adminChatId?: number;
+}): Promise<Response> {
+    const { asns, fromRouter, toRouter, adminChatId } = body;
+    if (!asns || !fromRouter || !toRouter) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing asns, fromRouter, or toRouter');
+    }
+
+    const redis = getRedis();
+    const payload = JSON.stringify({ fromRouter, toRouter, adminChatId });
+    const TTL_SECONDS = 86400; // 24 hours
+
+    for (const asn of asns) {
+        await redis.set(`migrate:notify:${asn}`, payload, 'EX', TTL_SECONDS);
+    }
+
+    console.log(`[Admin] Stored ${asns.length} migration notification(s) pending: ${fromRouter} → ${toRouter}`);
+    return success(c, { stored: asns.length });
+}
+
+/**
+ * Check if any migrated sessions are now ENABLED and return those ready for notification.
+ * Called periodically by the bot.
+ */
+async function checkMigrationNotify(c: Context, _body: Record<string, unknown>): Promise<Response> {
+    const redis = getRedis();
+    const models = getModels();
+
+    // Scan for pending migration notification keys
+    const keys = await redis.keys('migrate:notify:*');
+    if (keys.length === 0) {
+        return success(c, { ready: [], pending: 0 });
+    }
+
+    const ready: Array<{
+        asn: number;
+        fromRouter: string;
+        toRouter: string;
+        adminChatId?: number;
+        serverEndpoint: string | null;
+    }> = [];
+
+    for (const key of keys) {
+        const asn = Number(key.split(':').pop());
+        if (isNaN(asn)) continue;
+
+        const raw = await redis.get(key);
+        if (!raw) continue;
+
+        const data = JSON.parse(raw) as { fromRouter: string; toRouter: string; adminChatId?: number };
+
+        // Check if this ASN has an ENABLED session (setup completed)
+        const session = await models.bgpSessions.findOne({
+            where: { asn, status: PeeringStatus.ENABLED },
+            attributes: ['uuid', 'router', 'credential'],
+        });
+
+        if (session) {
+            // Resolve server endpoint
+            const routerUuid = session.get('router') as string;
+            const router = await models.routers.findOne({ where: { uuid: routerUuid } });
+            const publicIp = router?.get('publicIp') as string | null;
+
+            let serverEndpoint: string | null = null;
+            const credential = session.get('credential') as string | null;
+            if (credential) {
+                try {
+                    const cred = JSON.parse(credential);
+                    if (publicIp && cred.listen_port) {
+                        serverEndpoint = `${publicIp}:${cred.listen_port}`;
+                    }
+                } catch { /* ignore */ }
+            }
+
+            ready.push({
+                asn,
+                fromRouter: data.fromRouter,
+                toRouter: data.toRouter,
+                adminChatId: data.adminChatId,
+                serverEndpoint,
+            });
+
+            // Clean up — notification consumed
+            await redis.del(key);
+        }
+    }
+
+    return success(c, { ready, pending: keys.length - ready.length });
 }

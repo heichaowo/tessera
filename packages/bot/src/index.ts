@@ -237,6 +237,9 @@ async function main() {
 
     // Check for unprocessed pending requests after startup
     await notifyPendingOnStartup(bot);
+
+    // Start periodic migration notification checker
+    startMigrationNotifyChecker(bot);
 }
 
 /**
@@ -288,6 +291,103 @@ async function notifyPendingOnStartup(bot: Bot<BotContext>) {
     } catch (error) {
         console.error('[Startup] Failed to check pending requests:', error);
     }
+}
+
+/**
+ * Periodically check for migrated sessions that have reached ENABLED status
+ * and send notifications to affected users.
+ */
+function startMigrationNotifyChecker(bot: Bot<BotContext>) {
+    if (!config.apiUrl) return;
+
+    const CHECK_INTERVAL = 60_000; // 60 seconds
+
+    setInterval(async () => {
+        try {
+            const { apiRequest } = await import('./commands/peer/api');
+
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'checkMigrationNotify',
+            }, config.apiToken);
+
+            if (result.code !== 0) return;
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const data = result.data as any;
+            const ready = (data?.ready || []) as Array<{
+                asn: number;
+                fromRouter: string;
+                toRouter: string;
+                adminChatId?: number;
+                serverEndpoint: string | null;
+            }>;
+
+            if (ready.length === 0) return;
+
+            // Resolve ASNs to telegram IDs
+            const asns = ready.map(r => r.asn);
+            const targetsResult = await apiRequest('/admin', 'POST', {
+                action: 'getNotificationTargets',
+                asns,
+            }, config.apiToken);
+
+            if (targetsResult.code !== 0) return;
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const targets = ((targetsResult.data as any)?.targets || []) as Array<{ asn: number; telegramId: number }>;
+            const targetMap = new Map(targets.map(t => [t.asn, t.telegramId]));
+
+            let sent = 0;
+            for (const item of ready) {
+                const telegramId = targetMap.get(item.asn);
+                if (!telegramId) continue;
+
+                const endpointLine = item.serverEndpoint
+                    ? `🖥️ New Endpoint 新地址: \`${item.serverEndpoint}\`\n`
+                    : '';
+
+                const message =
+                    `🔄 *Peer Migration Complete*\n` +
+                    `Peer 迁移完成\n\n` +
+                    `Your peer \`AS${item.asn}\` has been successfully migrated:\n` +
+                    `您的 Peer \`AS${item.asn}\` 已成功迁移:\n\n` +
+                    `📍 From 原节点: \`${item.fromRouter}\`\n` +
+                    `📍 To 新节点: \`${item.toRouter}\`\n` +
+                    `${endpointLine}\n` +
+                    `⚠️ *Action Required 需要操作:*\n` +
+                    `Please update your WireGuard Endpoint.\n` +
+                    `请更新 WireGuard Endpoint。\n` +
+                    `Use \`/info\` to view your full config.\n` +
+                    `使用 \`/info\` 查看完整配置。`;
+
+                try {
+                    await bot.api.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
+                    sent++;
+                } catch (e) {
+                    console.error(`[MigrateNotify] Failed to notify AS${item.asn}:`, e);
+                }
+            }
+
+            if (sent > 0) {
+                console.log(`[MigrateNotify] Sent ${sent} migration notification(s)`);
+
+                // Notify admin about completed notifications
+                const adminChatId = ready[0]?.adminChatId || config.adminChatId;
+                if (adminChatId) {
+                    await bot.api.sendMessage(
+                        adminChatId,
+                        `✅ Migration notification sent to ${sent}/${ready.length} user(s).\n` +
+                        `迁移通知已发送给 ${sent}/${ready.length} 个用户。`
+                    );
+                }
+            }
+        } catch (error) {
+            // Silently ignore — just a background check
+            console.error('[MigrateNotify] Check error:', error);
+        }
+    }, CHECK_INTERVAL);
+
+    console.log(`[MigrateNotify] Checker started (interval: ${CHECK_INTERVAL / 1000}s)`);
 }
 
 main();

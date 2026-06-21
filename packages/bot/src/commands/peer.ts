@@ -1914,7 +1914,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            const sessions: Array<{ uuid: string; router: string; routerName?: string; status: number; ipv6?: string; endpoint?: string }> = result.data?.sessions || [];
+            const sessions: Array<{ uuid: string; router: string; routerName?: string; status: number; ipv6?: string; endpoint?: string; serverEndpoint?: string; serverWgKey?: string }> = result.data?.sessions || [];
 
             if (sessions.length === 0) {
                 await ctx.reply(
@@ -1986,7 +1986,9 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 message += `*${i + 1}. ${displayName}* ${statusIcon} ${statusText}\n`;
 
                 if (s.ipv6) message += `   IPv6: \`${s.ipv6}\`\n`;
-                if (s.endpoint) message += `   Endpoint: \`${s.endpoint}\`\n`;
+                if (s.endpoint) message += `   Your Endpoint: \`${s.endpoint}\`\n`;
+                if (s.serverEndpoint) message += `   🖥️ Server Endpoint: \`${s.serverEndpoint}\`\n`;
+                if (s.serverWgKey) message += `   🔑 Server Key: \`${s.serverWgKey.slice(0, 10)}...\`\n`;
 
                 // Live status from agent
                 if (s.status === 1) {
