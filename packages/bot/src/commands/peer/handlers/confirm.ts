@@ -41,7 +41,7 @@ export function registerConfirmHandlers(bot: Bot<BotContext>) {
             }, config.apiToken);
 
             if (result.code !== 0) {
-                await ctx.reply(`❌ Failed to create peer: ${result.message}`);
+                await ctx.reply(`❌ Failed to create peer: ${result.message}\n创建 Peer 失败: ${result.message}`);
                 ctx.session.peerFlow = undefined;
                 return;
             }
@@ -49,7 +49,7 @@ export function registerConfirmHandlers(bot: Bot<BotContext>) {
             const sessionUuid = result.data?.uuid || '';
 
             const statusText = flow.isAdminMode
-                ? `✅ Status: ACTIVE (免审核)`
+                ? `✅ Status: ACTIVE (免审核 No approval needed)`
                 : `⏳ Status: Pending Review\n等待管理员审核`;
 
             const successText =
@@ -104,7 +104,7 @@ export function registerConfirmHandlers(bot: Bot<BotContext>) {
             ctx.session.peerFlow = undefined;
         } catch (error) {
             console.error('[Peer] Create error:', error);
-            await ctx.reply('❌ Failed to create peer.');
+            await ctx.reply('❌ Failed to create peer.\n创建 Peer 失败。');
             ctx.session.peerFlow = undefined;
         }
     });

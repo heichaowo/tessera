@@ -535,7 +535,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         const asn = normalizeAsn(asnStr);
 
         if (isNaN(asn)) {
-            await ctx.reply('❌ Invalid ASN format');
+            await ctx.reply('❌ Invalid ASN format\n无效的 ASN 格式');
             return;
         }
 
@@ -577,7 +577,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         const [endpoint, port] = endpointPort.split(':');
 
         if (!pubkey || pubkey.length !== 44) {
-            await ctx.reply('❌ Invalid WireGuard public key (should be 44 chars base64)');
+            await ctx.reply('❌ Invalid WireGuard public key (should be 44 chars base64)\n无效的 WireGuard 公钥');
             return;
         }
 
@@ -705,7 +705,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
             if (couldPeer.length === 0) {
                 await ctx.reply(
-                    `${msgText}\n❌ 当前没有可 Peer 的节点 / No available nodes for peering`,
+                    `${msgText}\n❌ No available nodes for peering\n当前没有可 Peer 的节点`,
                     { reply_markup: { remove_keyboard: true } }
                 );
                 ctx.session.peerFlow = undefined;
@@ -871,7 +871,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         const bitmask = ctx.match[1]!;
         const flow = ctx.session.announceFlow;
-        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.\n会话已过期，请重新执行 /announce'); return; }
 
         const keyboard = buildNodeKeyboard(flow.routerNames, bitmask);
 
@@ -892,7 +892,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         const bitmask = ctx.match[2]!;
         const flow = ctx.session.announceFlow;
-        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.\n会话已过期，请重新执行 /announce'); return; }
 
         const keyboard = buildNodeKeyboard(flow.routerNames, bitmask);
 

@@ -205,7 +205,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }, config.apiToken);
 
             if (result.code !== 0 || !result.data?.routers) {
-                await ctx.reply('❌ Failed to fetch nodes.');
+                await ctx.reply('❌ Failed to fetch nodes.\n获取节点列表失败。');
                 return;
             }
 
@@ -279,7 +279,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
             if (couldPeer.length === 0) {
                 await ctx.reply(
-                    `${msgText}\n❌ 当前没有可 Peer 的节点 / No available nodes for peering`,
+                    `${msgText}\n❌ No available nodes for peering\n当前没有可 Peer 的节点`,
                     { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
                 );
                 return;
@@ -305,7 +305,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 };
 
                 await ctx.reply(
-                    `${msgText}\n只有一个可选节点，自动选择 \`${selectedLabel}\``,
+                    `${msgText}\nOnly one node available, auto-selected \`${selectedLabel}\`\n只有一个可选节点，自动选择`,
                     { parse_mode: 'Markdown' }
                 );
 
@@ -328,7 +328,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
 
             // Send selection prompt with ReplyKeyboard
             await ctx.reply(
-                '选择节点 / Select node:',
+                'Select node:\n选择节点:',
                 {
                     reply_markup: {
                         keyboard,
@@ -339,7 +339,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             );
         } catch (error) {
             console.error('[Peer] Error:', error);
-            await ctx.reply('❌ Failed to fetch nodes.');
+            await ctx.reply('❌ Failed to fetch nodes.\n获取节点列表失败。');
         }
     });
 
@@ -496,7 +496,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 }
                 if (text.includes('No') || text.includes('不使用')) {
                     ctx.session.peerFlow = { ...flow, step: 'input_contact', psk: undefined };
-                    await ctx.reply(`✅ PSK: Disabled`, { reply_markup: { remove_keyboard: true } });
+                    await ctx.reply(`✅ PSK: Disabled\nPSK 已禁用`, { reply_markup: { remove_keyboard: true } });
                     await promptContact(ctx);
                     return;
                 }
@@ -943,7 +943,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 // Submit all changes to API
                 if (!flow.sessionUuid || !flow.current) {
                     ctx.session.peerFlow = undefined;
-                    await ctx.reply('❌ Error: No session data');
+                    await ctx.reply('❌ Error: No session data\n错误：缺少会话数据');
                     return;
                 }
 
@@ -1010,7 +1010,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 // Parse node selection (format: "📍 nodeName (location)")
                 const nodeMatch = text.match(/📍\s*(.+?)\s*\(/);
                 if (!nodeMatch) {
-                    await ctx.reply('❌ Invalid selection. Please choose from the menu.');
+                    await ctx.reply('❌ Invalid selection. Please choose from the menu.\n无效选项，请从菜单中选择。');
                     return;
                 }
 
@@ -1023,7 +1023,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     const targetNode = nodes.find((n: { name: string }) => n.name === selectedNodeName);
 
                     if (!targetNode) {
-                        await ctx.reply('❌ Node not found. Please try again.');
+                        await ctx.reply('❌ Node not found. Please try again.\n未找到节点，请重试。');
                         return;
                     }
 
@@ -1045,7 +1045,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
                     );
                 } catch {
-                    await ctx.reply('❌ Failed to fetch node info');
+                    await ctx.reply('❌ Failed to fetch node info\n获取节点信息失败');
                 }
 
                 await showModifyMenu(ctx);
@@ -1077,7 +1077,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     current.extendedNexthop = false;
                     await ctx.reply('✅ Session type updated: IPv6 + IPv4 (独立会话)\n会话类型已更新');
                 } else {
-                    await ctx.reply('❌ Invalid selection');
+                    await ctx.reply('❌ Invalid selection\n无效选项');
                     return;
                 }
 
@@ -1140,7 +1140,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                         { parse_mode: 'Markdown' }
                     );
                 } else {
-                    await ctx.reply('❌ Invalid selection');
+                    await ctx.reply('❌ Invalid selection\n无效选项');
                 }
                 return;
             }
@@ -1174,7 +1174,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                     ctx.session.peerFlow = { ...flow, current };
                     await ctx.reply('✅ PSK disabled\nPSK 已禁用');
                 } else {
-                    await ctx.reply('❌ Invalid selection');
+                    await ctx.reply('❌ Invalid selection\n无效选项');
                     return;
                 }
 
@@ -1185,7 +1185,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             case 'input_ipv6': {
                 const ipv6 = text.includes('/') ? text.split('/')[0] : text;
                 if (!isValidIPv6(ipv6 || '')) {
-                    await ctx.reply('❌ Invalid IPv6 address. Please try again.');
+                    await ctx.reply('❌ Invalid IPv6 address. Please try again.\n无效的 IPv6 地址，请重试。');
                     return;
                 }
                 ctx.session.peerFlow = { ...flow, step: 'input_endpoint', ipv6 };

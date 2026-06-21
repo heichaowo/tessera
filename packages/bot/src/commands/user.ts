@@ -519,7 +519,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         const asn = normalizeAsn(text);
 
         if (asn < 4242420000 || asn > 4242429999) {
-            await ctx.reply(`${ICONS.error} Invalid ASN. DN42 range: 4242420000-4242429999`);
+            await ctx.reply(`${ICONS.error} Invalid ASN. DN42 range: 4242420000-4242429999\n无效的 ASN。DN42 范围: 4242420000-4242429999`);
             return;
         }
 
@@ -612,7 +612,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             );
         } catch (error) {
             console.error('[Login] Error:', error);
-            await ctx.reply(`${ICONS.error} Failed to query authentication methods`);
+            await ctx.reply(`${ICONS.error} Failed to query authentication methods\n查询认证方式失败`);
         }
     });
 
