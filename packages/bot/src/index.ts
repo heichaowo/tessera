@@ -117,11 +117,13 @@ export function createBot(): Bot<BotContext> {
  * Set bot commands menu
  */
 async function setBotCommands(bot: Bot<BotContext>) {
+    // Public commands visible to all users
     await bot.api.setMyCommands([
         { command: 'start', description: 'Start / Help 开始' },
         { command: 'help', description: 'Show commands 帮助' },
         { command: 'login', description: 'Login with ASN 登录' },
         { command: 'logout', description: 'Logout 登出' },
+        { command: 'whoami', description: 'Show current session 当前登录' },
         { command: 'peer', description: 'Create peer 建立连接' },
         { command: 'peers', description: 'List peers 连接列表' },
         { command: 'info', description: 'Peer status 连接状态' },
@@ -130,11 +132,40 @@ async function setBotCommands(bot: Bot<BotContext>) {
         { command: 'status', description: 'WG/BGP status 状态' },
         { command: 'restart', description: 'Restart peer 重启连接' },
         { command: 'ping', description: 'Ping test 网络测试' },
+        { command: 'tcping', description: 'TCP ping test TCP测试' },
         { command: 'trace', description: 'Traceroute 路由追踪' },
+        { command: 'route', description: 'Route lookup 路由查询' },
+        { command: 'lg', description: 'Looking glass 路由镜像' },
+        { command: 'path', description: 'AS path query AS路径' },
         { command: 'whois', description: 'WHOIS lookup 信息查询' },
         { command: 'dig', description: 'DNS lookup DNS查询' },
+        { command: 'findnoc', description: 'Find NOC contacts 查联系' },
+        { command: 'community', description: 'BGP communities 社区标记' },
+        { command: 'latency', description: 'Latency probe 延迟探测' },
+        { command: 'flaps', description: 'Route flap history 路由抖动' },
+        { command: 'stats', description: 'Network stats 网络统计' },
+        { command: 'rank', description: 'Peer rankings 排行榜' },
+        { command: 'peerlist', description: 'All peers list 全部用户' },
         { command: 'cancel', description: 'Cancel operation 取消操作' },
     ]);
+
+    // Admin-only commands (visible only in admin chat)
+    if (config.adminChatId) {
+        await bot.api.setMyCommands([
+            { command: 'pending', description: 'Pending reviews 待审核' },
+            { command: 'approve', description: 'Approve session 批准' },
+            { command: 'reject', description: 'Reject session 拒绝' },
+            { command: 'sessions', description: 'All sessions 所有会话' },
+            { command: 'nodes', description: 'Node list 节点列表' },
+            { command: 'addnode', description: 'Add router 添加节点' },
+            { command: 'addpeer', description: 'Admin add peer 管理加连接' },
+            { command: 'announce', description: 'Broadcast message 全员公告' },
+            { command: 'notify', description: 'Notify users 定向通知' },
+            { command: 'block', description: 'Block ASN 封禁' },
+            { command: 'unblock', description: 'Unblock ASN 解封' },
+            { command: 'main', description: 'Maintenance mode 维护模式' },
+        ], { scope: { type: 'chat', chat_id: Number(config.adminChatId) } });
+    }
 }
 
 /**
