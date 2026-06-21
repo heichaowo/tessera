@@ -7,7 +7,7 @@ import { getEmailProvider } from '../providers/email';
 import config from '../config';
 import { PeeringStatus, SessionPolicy } from '../db/models/bgpSessions';
 import { Op } from 'sequelize';
-import { generateUUID, getInterfaceName, getListenPort } from '../common/helpers';
+import { generateUUID, getInterfaceName, getListenPort, timingSafeCompare } from '../common/helpers';
 import { assertTransition, getWhitelist, saveWhitelist } from '../services/workflowEngine';
 import {
     getContinentFromRegionCode,
@@ -34,7 +34,7 @@ async function isAdmin(c: Context): Promise<boolean> {
     const token = authHeader.substring(7);
 
     // Check if it's the API token (for bot/agent)
-    if (token === config.auth.agentApiKey) {
+    if (config.auth.agentApiKey && timingSafeCompare(token, config.auth.agentApiKey)) {
         return true;
     }
 

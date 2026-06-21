@@ -40,13 +40,20 @@ const ROUTE_LIMITS: Record<string, RateLimitConfig> = {
 };
 
 /**
- * Get client identifier from request
+ * Get client identifier from request.
+ * Uses TRUSTED_PROXY_COUNT to pick the correct IP from X-Forwarded-For.
+ * Default 1 (typical single reverse proxy like nginx).
  */
 function getClientKey(c: Context): string {
-    // Prefer X-Forwarded-For for proxied requests
+    const trustedHops = Number(process.env.TRUSTED_PROXY_COUNT) || 1;
+
     const forwarded = c.req.header('X-Forwarded-For');
     if (forwarded) {
-        return forwarded.split(',')[0]?.trim() ?? 'unknown';
+        const ips = forwarded.split(',').map(s => s.trim());
+        // Pick the IP that is `trustedHops` from the right
+        // e.g. with 1 trusted proxy: "client, proxy" → pick "client" (index len-2)
+        const idx = Math.max(0, ips.length - trustedHops);
+        return ips[idx] ?? 'unknown';
     }
 
     // Fall back to X-Real-IP

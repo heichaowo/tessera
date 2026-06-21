@@ -2,6 +2,8 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
+import { apiRequest } from '../api';
+import { isAdmin } from '../guards';
 import { calculatePort, normalizeAsn, isAsnInput } from './peer/validators';
 
 /**
@@ -9,30 +11,6 @@ import { calculatePort, normalizeAsn, isAsnInput } from './peer/validators';
  */
 function escapeMarkdown(text: string): string {
     return text.replace(/([*_`\[])/g, '\\$1');
-}
-
-/**
- * API client for moenet-core
- */
-async function apiRequest(endpoint: string, method = 'POST', body?: unknown, token?: string) {
-    const response = await fetch(`${config.apiUrl}${endpoint}`, {
-        method,
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': token ? `Bearer ${token}` : '',
-        },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return response.json() as Promise<ApiResponse>;
-}
-
-/**
- * Check if user is admin
- */
-function isAdmin(ctx: BotContext): boolean {
-    const username = ctx.from?.username?.toLowerCase();
-    const adminUsername = config.adminUsername.toLowerCase().replace('@', '');
-    return username === adminUsername || ctx.session.isAdmin === true;
 }
 
 export function registerAdminCommands(bot: Bot<BotContext>) {

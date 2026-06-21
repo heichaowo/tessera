@@ -9,6 +9,8 @@ export default {
     },
 
     cors: {
+        // NOTE: Default '*' is acceptable for API-only (no browser cookies).
+        // Set CORS_ORIGINS if adding browser-based admin panel.
         origins: (process.env.CORS_ORIGINS || '*').split(','),
     },
 

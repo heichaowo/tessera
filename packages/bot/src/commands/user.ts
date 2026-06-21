@@ -2,6 +2,7 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
+import { apiRequest } from '../api';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
@@ -28,23 +29,6 @@ import { normalizeAsn, isAsnInput } from './peer/validators';
 // Types
 // =============================================================================
 
-interface APIResponse {
-    code: number;
-    message?: string;
-    data?: {
-        person?: string;
-        mntBy?: string;
-        availableAuthMethods?: Array<{
-            type: number;
-            value?: string;
-            fingerprint?: string;
-            name?: string;
-            data?: string;
-        }>;
-        [key: string]: unknown;
-    };
-}
-
 interface ChallengeData {
     asn: number;
     mntBy: string;
@@ -53,29 +37,24 @@ interface ChallengeData {
     gpgFp?: string;
     sshKey?: string;
     email?: string;
+    createdAt: number;
+    attempts: number;
 }
 
 // Store for verification challenges
 const challengeStore = new Map<number, ChallengeData>();
+const CHALLENGE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_VERIFY_ATTEMPTS = 5;
 
-// =============================================================================
-// API Client
-// =============================================================================
-
-async function apiRequest(endpoint: string, method = 'POST', body?: unknown, token?: string): Promise<APIResponse> {
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-    };
-    if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+// Periodic cleanup of expired challenges
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, data] of challengeStore) {
+        if (now - data.createdAt > CHALLENGE_TTL_MS) {
+            challengeStore.delete(key);
+        }
     }
-    const response = await fetch(`${config.apiUrl}${endpoint}`, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return response.json() as Promise<APIResponse>;
-}
+}, 60_000);
 
 /**
  * Register user telegramId via admin API (fire-and-forget).
@@ -150,6 +129,7 @@ function spawnAsync(
         const proc = spawn(cmd, args);
         let stdout = '';
         let stderr = '';
+        let settled = false;
 
         proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
         proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
@@ -160,16 +140,22 @@ function spawnAsync(
         }
 
         const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
             proc.kill('SIGKILL');
             reject(new Error(`${cmd} timed out`));
         }, options?.timeout ?? 30000);
 
         proc.on('close', (code: number | null) => {
+            if (settled) return;
+            settled = true;
             clearTimeout(timer);
             resolve({ stdout, stderr, code: code ?? 1 });
         });
 
         proc.on('error', (err: Error) => {
+            if (settled) return;
+            settled = true;
             clearTimeout(timer);
             reject(err);
         });
@@ -242,9 +228,8 @@ async function verifyGpgSignatureFull(
     expectedContent: string,
     gpgFingerprints: string[]
 ): Promise<{ verified: boolean; fingerprint?: string; needsManualKey?: boolean; error?: string }> {
-    const tmpDir = os.tmpdir();
-    const uniqueId = crypto.randomBytes(16).toString('hex');
-    const sigFile = path.join(tmpDir, `sig_${uniqueId}.asc`);
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'moenet-gpg-'));
+    const sigFile = path.join(tmpDir, 'sig.asc');
 
     try {
         await fs.writeFile(sigFile, signature);
@@ -290,7 +275,7 @@ async function verifyGpgSignatureFull(
 
     } finally {
         try {
-            await fs.unlink(sigFile);
+            await fs.rm(tmpDir, { recursive: true, force: true });
         } catch { }
     }
 }
@@ -319,11 +304,10 @@ async function verifySshSignatureFull(
     challenge: string,
     sshKey: string
 ): Promise<{ verified: boolean; error?: string }> {
-    const tmpDir = os.tmpdir();
-    const uniqueId = crypto.randomBytes(16).toString('hex');
-    const sigFile = path.join(tmpDir, `ssh_sig_${uniqueId}.sig`);
-    const pubFile = path.join(tmpDir, `ssh_pub_${uniqueId}.pub`);
-    const allowFile = path.join(tmpDir, `ssh_allow_${uniqueId}.txt`);
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'moenet-ssh-'));
+    const sigFile = path.join(tmpDir, 'sig.sig');
+    const pubFile = path.join(tmpDir, 'pub.pub');
+    const allowFile = path.join(tmpDir, 'allow.txt');
 
     try {
         const normalizedSig = normalizeSshSignature(signature);
@@ -358,9 +342,7 @@ async function verifySshSignatureFull(
         console.error(`[SSH Verify] Error: ${(error as Error).message}`);
         return { verified: false, error: (error as Error).message || String(error) };
     } finally {
-        for (const f of [sigFile, pubFile, allowFile]) {
-            try { await fs.unlink(f); } catch { }
-        }
+        try { await fs.rm(tmpDir, { recursive: true, force: true }); } catch { }
     }
 }
 
@@ -570,9 +552,8 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                 }
             }
 
-            // Debug: log what we received
-            console.log('[Login] availableAuthMethods:', JSON.stringify(availableAuthMethods));
-            console.log('[Login] Parsed - GPG:', gpgFingerprints.length, 'SSH:', sshKeys.length, 'Email:', emails.length);
+            // Log method counts (avoid logging full key material)
+            console.log(`[Login] AS${asn} auth methods - GPG: ${gpgFingerprints.length}, SSH: ${sshKeys.length}, Email: ${emails.length}`);
 
             // Build auth method keyboard
             const keyboard = new InlineKeyboard();
@@ -587,8 +568,6 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                 keyboard.text('📧 Email 邮箱', `login:email:${asn}`).row();
             }
 
-            // Debug: log keyboard state
-            console.log('[Login] Keyboard inline_keyboard:', JSON.stringify(keyboard));
 
             // Store available auth data
             challengeStore.set(ctx.from.id, {
@@ -599,6 +578,8 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                 gpgFp: gpgFingerprints[0],
                 sshKey: sshKeys[0],
                 email: emails[0],
+                createdAt: Date.now(),
+                attempts: 0,
             });
 
             await ctx.reply(
@@ -637,6 +618,8 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             challenge,
             method: 'gpg',
             gpgFp,
+            createdAt: Date.now(),
+            attempts: 0,
         });
 
         const fpDisplay = gpgFp.length > 16 ? `${gpgFp.slice(0, 8)}...${gpgFp.slice(-8)}` : gpgFp;
@@ -680,6 +663,8 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             challenge,
             method: 'ssh',
             sshKey,
+            createdAt: Date.now(),
+            attempts: 0,
         });
 
         const sshKeyDisplay = sshKey.length > 60 ? `\`${sshKey.slice(0, 60)}...\`` : `\`${sshKey}\``;
@@ -736,6 +721,8 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             challenge: code,
             method: 'email',
             email,
+            createdAt: Date.now(),
+            attempts: 0,
         });
 
         await ctx.answerCallbackQuery();
@@ -798,6 +785,27 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
         if (!stored || !stored.challenge) {
             return next();
+        }
+
+        // Check TTL
+        if (Date.now() - stored.createdAt > CHALLENGE_TTL_MS) {
+            challengeStore.delete(userId);
+            await ctx.reply(
+                `${ICONS.error} Challenge expired. Please use /login again.\n` +
+                `验证已过期，请重新 /login。`
+            );
+            return;
+        }
+
+        // Check attempt limit
+        stored.attempts++;
+        if (stored.attempts > MAX_VERIFY_ATTEMPTS) {
+            challengeStore.delete(userId);
+            await ctx.reply(
+                `${ICONS.error} Too many failed attempts. Please use /login again.\n` +
+                `失败次数过多，请重新 /login。`
+            );
+            return;
         }
 
         const text = ctx.message.text.trim();

@@ -15,50 +15,10 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
+import { apiRequest } from '../api';
 import { getRanking, getAsnInfo, getNetworkStats } from '../services/iedonApi';
 import type { RankingEntry } from '../services/iedonApi';
 import { normalizeAsn, isAsnInput } from './peer/validators';
-
-// ---------------------------------------------------------------------------
-// MoeNet Core API Client
-// ---------------------------------------------------------------------------
-
-interface ApiResponse {
-    code: number;
-    message: string;
-    data?: {
-        stats?: {
-            totalPeers: number;
-            activePeers: number;
-            pendingPeers: number;
-            totalNodes: number;
-            activeNodes: number;
-        };
-        routers?: {
-            name: string;
-            location: string;
-            sessionCount: number;
-            isOpen: boolean;
-        }[];
-        sessions?: {
-            asn: number;
-            router: string;
-            status: number;
-        }[];
-    };
-}
-
-async function apiRequest(endpoint: string, method = 'POST', body?: unknown) {
-    const response = await fetch(`${config.apiUrl}${endpoint}`, {
-        method,
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiToken}`,
-        },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return response.json() as Promise<ApiResponse>;
-}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -185,7 +145,7 @@ export function registerStatsCommands(bot: Bot<BotContext>) {
         try {
             const [dn42Stats, localResult] = await Promise.all([
                 getNetworkStats(),
-                apiRequest('/admin', 'POST', { action: 'getStats' }),
+                apiRequest('/admin', 'POST', { action: 'getStats' }, config.apiToken),
             ]);
 
             let message = `📊 *DN42 Network Statistics*\nDN42 全网统计\n\n`;
@@ -203,9 +163,9 @@ export function registerStatsCommands(bot: Bot<BotContext>) {
                 message += `    待审: ${local.pendingPeers}\n\n`;
             } else {
                 // Fallback: try enumRouters
-                const routerResult = await apiRequest('/admin', 'POST', { action: 'enumRouters' });
-                const routers = routerResult.data?.routers ?? [];
-                const totalPeers = routers.reduce((sum, r) => sum + r.sessionCount, 0);
+                const routerResult = await apiRequest('/admin', 'POST', { action: 'enumRouters' }, config.apiToken);
+                const routers = (routerResult.data?.routers ?? []) as Array<{ name: string; location: string; sessionCount: number; isOpen: boolean }>;
+                const totalPeers = routers.reduce((sum: number, r) => sum + r.sessionCount, 0);
                 const activeNodes = routers.filter((r) => r.isOpen).length;
 
                 message += `🏠 *MoeNet 本地:*\n`;
@@ -244,7 +204,7 @@ export function registerStatsCommands(bot: Bot<BotContext>) {
 
         try {
             if (isAdmin) {
-                const result = await apiRequest('/admin', 'POST', { action: 'enumSessions' });
+                const result = await apiRequest('/admin', 'POST', { action: 'enumSessions' }, config.apiToken);
 
                 if (result.code !== 0) {
                     await ctx.reply(`❌ Error: ${result.message}`);
@@ -290,7 +250,7 @@ export function registerStatsCommands(bot: Bot<BotContext>) {
                 }
 
                 let message = `👥 *Your Peers (${sessions.length})*\n\n`;
-                sessions.forEach((s, i) => {
+                sessions.forEach((s: { status: number; router: string }, i: number) => {
                     const statusIcon = s.status === 1 ? '🟢' : s.status === 3 ? '⏳' : '🔴';
                     message += `${i + 1}. ${statusIcon} ${s.router}\n`;
                 });

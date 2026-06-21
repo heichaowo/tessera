@@ -6,9 +6,10 @@ import config from './config';
 import { getRedisClient } from './storage';
 
 /**
- * Rate limit tracking per user
+ * Rate limit tracking per user (capped to prevent unbounded growth)
  */
 const rateLimitMap = new Map<number, { count: number; resetAt: number }>();
+const RATE_LIMIT_MAP_CAP = 10_000;
 
 /**
  * Metrics counters
@@ -39,6 +40,10 @@ export function rateLimitMiddleware<C extends Context>() {
         let userData = rateLimitMap.get(userId);
 
         if (!userData || now > userData.resetAt) {
+            // Skip tracking if map is at capacity (still allow the request)
+            if (rateLimitMap.size >= RATE_LIMIT_MAP_CAP && !rateLimitMap.has(userId)) {
+                return next();
+            }
             userData = { count: 1, resetAt: now + windowMs };
             rateLimitMap.set(userId, userData);
         } else {
@@ -72,8 +77,11 @@ export function metricsMiddleware<C extends Context>() {
             : '';
 
         if (command.startsWith('/')) {
-            const cmd = command.slice(1).toLowerCase();
-            metrics.commandCounts.set(cmd, (metrics.commandCounts.get(cmd) || 0) + 1);
+            const cmd = command.slice(1).toLowerCase().split('@')[0] || '';
+            // Only track if already known or under cap (prevents unbounded growth)
+            if (metrics.commandCounts.has(cmd) || metrics.commandCounts.size < 100) {
+                metrics.commandCounts.set(cmd, (metrics.commandCounts.get(cmd) || 0) + 1);
+            }
         }
 
         try {

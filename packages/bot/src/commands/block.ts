@@ -2,28 +2,10 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
+import { apiRequest } from '../api';
+import { isAdmin } from '../guards';
 import { normalizeAsn } from './peer/validators';
 
-/**
- * API client
- */
-async function apiRequest(endpoint: string, method = 'POST', body?: unknown) {
-    const response = await fetch(`${config.apiUrl}${endpoint}`, {
-        method,
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiToken}`,
-        },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return response.json() as Promise<ApiResponse>;
-}
-
-function isAdmin(ctx: BotContext): boolean {
-    const username = ctx.from?.username?.toLowerCase();
-    const adminUsername = config.adminUsername.toLowerCase().replace('@', '');
-    return username === adminUsername || ctx.session.isAdmin === true;
-}
 
 export function registerBlockCommands(bot: Bot<BotContext>) {
     /**
@@ -57,7 +39,7 @@ export function registerBlockCommands(bot: Bot<BotContext>) {
                 action: 'blockAsn',
                 asn: asnNumber,
                 reason,
-            });
+            }, config.apiToken);
 
             if (result.code !== 0) {
                 await ctx.reply(`❌ Error: ${result.message}`);
@@ -116,7 +98,7 @@ export function registerBlockCommands(bot: Bot<BotContext>) {
             const result = await apiRequest('/admin', 'POST', {
                 action: 'unblockAsn',
                 asn,
-            });
+            }, config.apiToken);
 
             if (result.code !== 0) {
                 await ctx.reply(`❌ Error: ${result.message}`);
@@ -148,7 +130,7 @@ export function registerBlockCommands(bot: Bot<BotContext>) {
             const result = await apiRequest('/admin', 'POST', {
                 action: 'unblockAsn',
                 asn,
-            });
+            }, config.apiToken);
 
             if (result.code !== 0) {
                 await ctx.answerCallbackQuery(`❌ ${result.message}`);
@@ -184,7 +166,7 @@ async function showBlocklist(ctx: BotContext, editMessageId?: number) {
     try {
         const result = await apiRequest('/admin', 'POST', {
             action: 'enumBlocklist',
-        });
+        }, config.apiToken);
 
         if (result.code !== 0) {
             const msg = `❌ Error: ${result.message}`;

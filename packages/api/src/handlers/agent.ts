@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { Op } from 'sequelize';
-import { bcryptCompare } from '../common/helpers';
+import { bcryptCompare, timingSafeCompare } from '../common/helpers';
 import { makeResponse, ResponseCode, success } from '../common/response';
 import { getModels } from '../db/dbContext';
 import { validateBody, isValidationError } from '../schemas/validate';
@@ -106,7 +106,7 @@ async function verifyAgentApiKey(c: Context, _router: string): Promise<boolean> 
     if (!token) return false;
 
     // Simple token comparison
-    return token === config.auth.agentApiKey;
+    return config.auth.agentApiKey ? timingSafeCompare(token, config.auth.agentApiKey) : false;
 }
 
 /**
@@ -385,7 +385,7 @@ async function handleGlobalHeartbeat(c: Context): Promise<Response> {
         return makeResponse(c, ResponseCode.UNAUTHORIZED);
     }
     const token = header.split('Bearer ')[1];
-    if (!token || token !== config.auth.agentApiKey) {
+    if (!token || !config.auth.agentApiKey || !timingSafeCompare(token, config.auth.agentApiKey)) {
         return makeResponse(c, ResponseCode.UNAUTHORIZED);
     }
 

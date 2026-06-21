@@ -31,6 +31,15 @@ async function main() {
 
     try {
         if (!standalone) {
+            // Validate critical secrets
+            if (config.auth.jwtSecret === 'change-me-in-production') {
+                console.error('❌ JWT_SECRET must be set (cannot use default value)');
+                process.exit(1);
+            }
+            if (!config.auth.agentApiKey) {
+                console.warn('⚠️  AGENT_API_KEY not set — agent/admin API will reject all requests');
+            }
+
             await initDatabase();
             console.log('✅ Database connected');
 

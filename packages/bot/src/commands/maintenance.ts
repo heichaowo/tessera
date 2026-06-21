@@ -8,16 +8,8 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
+import { isAdmin } from '../guards';
 import { getNodes, getNode, type RouterInfo } from '../providers/nodes';
-
-/**
- * Check if user is admin
- */
-function isAdmin(ctx: BotContext): boolean {
-    const username = ctx.from?.username?.toLowerCase();
-    const adminUsername = config.adminUsername.toLowerCase().replace('@', '');
-    return username === adminUsername || ctx.session.isAdmin === true;
-}
 
 /**
  * Call agent API

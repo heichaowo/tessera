@@ -2,6 +2,7 @@ import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { BotContext } from '../index';
 import config from '../config';
+import { apiRequest } from '../api';
 import { isChinaIP, resolveEndpoint, CN_REJECTION_MESSAGE } from '../providers/chinaIp';
 import { validateIpOwnership, isLinkLocal, isDN42ULA, isDN42IPv4 } from '../services/dn42Validator';
 
@@ -52,21 +53,6 @@ import {
     // API
     submitModifyChanges,
 } from './peer/index';
-
-/**
- * API client for moenet-core
- */
-async function apiRequest(endpoint: string, method = 'POST', body?: unknown, token?: string): Promise<APIResponse> {
-    const response = await fetch(`${config.apiUrl}${endpoint}`, {
-        method,
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': token ? `Bearer ${token}` : '',
-        },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return response.json() as Promise<APIResponse>;
-}
 
 /**
  * Show modify menu with ReplyKeyboard (dn42-bot style)
@@ -2577,7 +2563,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 return;
             }
 
-            const sessions = (result.data?.sessions || []).filter(s => s.status === 1);
+            const sessions = (result.data?.sessions || []).filter((s: { status: number }) => s.status === 1);
 
             if (sessions.length === 0) {
                 await ctx.reply(`❌ AS${targetAsn} has no active peers\nAS${targetAsn} 没有活跃的 Peer`);

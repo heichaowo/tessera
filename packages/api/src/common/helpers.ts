@@ -1,4 +1,5 @@
 import * as bcrypt from 'bcrypt';
+import { timingSafeEqual } from 'crypto';
 
 /**
  * Hash a string with bcrypt
@@ -54,4 +55,13 @@ export function getListenPort(asn: number): number {
 export function extractRegion(routerName: string): string {
     const parts = routerName.split('-');
     return parts[0] || routerName;
+}
+
+/**
+ * Timing-safe string comparison to prevent timing attacks on token/secret comparison.
+ * Returns false if lengths differ (constant-time for equal-length strings).
+ */
+export function timingSafeCompare(a: string, b: string): boolean {
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }

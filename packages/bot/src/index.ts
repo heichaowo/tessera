@@ -200,7 +200,10 @@ async function main() {
     await setBotCommands(bot);
 
     const port = config.webhookPort;
-    const webhookUrl = `https://${config.webhookDomain}/bot${config.telegramToken}`;
+    // Use a hash of the token for the webhook path to avoid exposing the raw token in access logs
+    const { createHash } = await import('crypto');
+    const webhookPath = `/webhook/${createHash('sha256').update(config.telegramToken).digest('hex').slice(0, 16)}`;
+    const webhookUrl = `https://${config.webhookDomain}${webhookPath}`;
 
     // Create Hono app for webhook and metrics
     const app = new Hono();
@@ -215,7 +218,7 @@ async function main() {
     const handleUpdate = webhookCallback(bot, 'hono', {
         secretToken: config.webhookSecret,
     });
-    app.post(`/bot${config.telegramToken}`, handleUpdate);
+    app.post(webhookPath, handleUpdate);
 
     // Set webhook
     await bot.api.setWebhook(webhookUrl, {
@@ -302,7 +305,7 @@ function startMigrationNotifyChecker(bot: Bot<BotContext>) {
 
     const CHECK_INTERVAL = 60_000; // 60 seconds
 
-    setInterval(async () => {
+    const intervalId = setInterval(async () => {
         try {
             const { apiRequest } = await import('./commands/peer/api');
 
@@ -388,6 +391,16 @@ function startMigrationNotifyChecker(bot: Bot<BotContext>) {
     }, CHECK_INTERVAL);
 
     console.log(`[MigrateNotify] Checker started (interval: ${CHECK_INTERVAL / 1000}s)`);
+
+    return intervalId;
 }
 
 main();
+
+// Graceful shutdown
+const shutdown = () => {
+    console.log('🛑 Shutting down...');
+    process.exit(0);
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

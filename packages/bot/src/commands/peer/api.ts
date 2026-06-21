@@ -5,27 +5,12 @@
  */
 
 import config from '../../config';
+import { apiRequest } from '../../api';
 import type { APIResponse } from './types';
 
-/**
- * API client for moenet-core
- */
-export async function apiRequest(
-    endpoint: string,
-    method = 'POST',
-    body?: unknown,
-    token?: string
-): Promise<APIResponse> {
-    const response = await fetch(`${config.apiUrl}${endpoint}`, {
-        method,
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': token ? `Bearer ${token}` : '',
-        },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return response.json() as Promise<APIResponse>;
-}
+// Re-export for backward compatibility with other modules
+export { apiRequest } from '../../api';
+export type { APIResponse } from './types';
 
 /**
  * Fetch routers list
