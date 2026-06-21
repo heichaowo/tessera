@@ -160,6 +160,7 @@ async function setBotCommands(bot: Bot<BotContext>) {
             { command: 'nodes', description: 'Node list 节点列表' },
             { command: 'addnode', description: 'Add router 添加节点' },
             { command: 'addpeer', description: 'Admin add peer 管理加连接' },
+            { command: 'migrate', description: 'Bulk migrate 批量迁移' },
             { command: 'announce', description: 'Broadcast message 全员公告' },
             { command: 'notify', description: 'Notify users 定向通知' },
             { command: 'block', description: 'Block ASN 封禁' },

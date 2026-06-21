@@ -117,6 +117,8 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await getStats(c);
         case 'migrate':
             return await migrateSession(c, body);
+        case 'bulkMigrate':
+            return await bulkMigrateSession(c, body);
         case 'blockAsn':
             return await blockAsn(c, body);
         case 'unblockAsn':
@@ -929,6 +931,169 @@ async function migrateSession(c: Context, body: {
         if (errStack) console.error('[Admin] Stack:', errStack);
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, `Failed to migrate session: ${errMsg}`);
     }
+}
+
+/**
+ * Bulk migrate all active sessions from one router to another.
+ * Supports dryRun mode to preview without executing.
+ *
+ * @param body.fromRouter - Source router UUID
+ * @param body.toRouter - Target router UUID
+ * @param body.dryRun - If true, only return the list of sessions that would be migrated
+ */
+async function bulkMigrateSession(c: Context, body: {
+    fromRouter?: string;
+    toRouter?: string;
+    dryRun?: boolean;
+}): Promise<Response> {
+    const { fromRouter, toRouter, dryRun } = body;
+
+    if (!fromRouter || !toRouter) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing fromRouter or toRouter');
+    }
+
+    if (fromRouter === toRouter) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Source and target router are the same');
+    }
+
+    const models = getModels();
+
+    // Verify both routers exist
+    const [sourceRouter, targetRouter] = await Promise.all([
+        models.routers.findOne({ where: { uuid: fromRouter } }),
+        models.routers.findOne({ where: { uuid: toRouter } }),
+    ]);
+
+    if (!sourceRouter) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Source router not found');
+    }
+    if (!targetRouter) {
+        return makeResponse(c, ResponseCode.NOT_FOUND, undefined, 'Target router not found');
+    }
+
+    const sourceRouterName = sourceRouter.get('name') as string;
+    const targetRouterName = targetRouter.get('name') as string;
+
+    // Find all active/enabled sessions on source router
+    const sessions = await models.bgpSessions.findAll({
+        where: {
+            router: fromRouter,
+            status: { [Op.in]: [PeeringStatus.ENABLED, PeeringStatus.PROBLEM] },
+        },
+    });
+
+    if (sessions.length === 0) {
+        return success(c, {
+            message: 'No active sessions to migrate',
+            fromRouter: sourceRouterName,
+            toRouter: targetRouterName,
+            count: 0,
+            sessions: [],
+        });
+    }
+
+    // Build session preview list
+    const sessionList = sessions.map(s => ({
+        uuid: s.get('uuid') as string,
+        asn: s.get('asn') as number,
+        contact: s.get('contact') as string | null,
+        status: s.get('status') as number,
+    }));
+
+    // Dry run - just return what would be migrated
+    if (dryRun) {
+        return success(c, {
+            dryRun: true,
+            fromRouter: sourceRouterName,
+            toRouter: targetRouterName,
+            count: sessionList.length,
+            sessions: sessionList,
+        });
+    }
+
+    // Execute migration for each session
+    const sequelize = getSequelize();
+    const results: Array<{ asn: number; uuid: string; newUuid: string; status: 'ok' | 'error'; error?: string }> = [];
+
+    for (const session of sessions) {
+        const sessionData = session.get();
+        const asn = sessionData.asn as number;
+        const uuid = sessionData.uuid as string;
+
+        // Check if session already exists on target (ignore deleted)
+        const existing = await models.bgpSessions.findOne({
+            where: { router: toRouter, asn },
+        });
+        if (existing) {
+            const existingStatus = existing.get('status') as number;
+            if (existingStatus === 0) {
+                await existing.destroy();
+            } else {
+                results.push({ asn, uuid, newUuid: '', status: 'error', error: 'Already exists on target router' });
+                continue;
+            }
+        }
+
+        const t = await sequelize.transaction();
+        try {
+            // Queue old session for deletion
+            await models.bgpSessions.update(
+                { status: PeeringStatus.QUEUED_FOR_DELETE },
+                { where: { uuid }, transaction: t }
+            );
+
+            // Create new session on target router
+            const newUuid = generateUUID();
+            const interfaceName = getInterfaceName(asn);
+
+            await models.bgpSessions.create({
+                uuid: newUuid,
+                router: toRouter,
+                asn,
+                status: PeeringStatus.QUEUED_FOR_SETUP,
+                mtu: sessionData.mtu || 1420,
+                policy: sessionData.policy || SessionPolicy.FULL,
+                ipv4: sessionData.ipv4 || null,
+                ipv6: sessionData.ipv6 || null,
+                ipv6LinkLocal: sessionData.ipv6LinkLocal || null,
+                localIpv4: sessionData.localIpv4 || null,
+                type: sessionData.type || 'wireguard',
+                extensions: sessionData.extensions
+                    ? (typeof sessionData.extensions === 'string' ? sessionData.extensions : JSON.stringify(sessionData.extensions))
+                    : null,
+                interface: interfaceName,
+                endpoint: sessionData.endpoint || null,
+                credential: sessionData.credential
+                    ? (typeof sessionData.credential === 'string' ? sessionData.credential : JSON.stringify(sessionData.credential))
+                    : null,
+                data: null,
+                lastError: null,
+                contact: sessionData.contact || null,
+            }, { transaction: t });
+
+            await t.commit();
+            results.push({ asn, uuid, newUuid, status: 'ok' });
+            console.log(`[BulkMigrate] AS${asn}: ${sourceRouterName} -> ${targetRouterName} (${uuid} -> ${newUuid})`);
+        } catch (error) {
+            await t.rollback();
+            const errMsg = error instanceof Error ? error.message : String(error);
+            results.push({ asn, uuid, newUuid: '', status: 'error', error: errMsg });
+            console.error(`[BulkMigrate] Failed AS${asn}:`, errMsg);
+        }
+    }
+
+    const migrated = results.filter(r => r.status === 'ok').length;
+    const failed = results.filter(r => r.status === 'error').length;
+
+    console.log(`[BulkMigrate] Complete: ${migrated} migrated, ${failed} failed (${sourceRouterName} -> ${targetRouterName})`);
+
+    return success(c, {
+        fromRouter: sourceRouterName,
+        toRouter: targetRouterName,
+        migrated,
+        failed,
+        results,
+    });
 }
 
 // =============================================================================

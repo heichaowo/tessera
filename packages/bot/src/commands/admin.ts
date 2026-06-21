@@ -131,6 +131,196 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         await showPendingList(ctx, ctx.callbackQuery.message?.message_id);
     });
 
+    // =========================================================================
+    // /migrate - Bulk migrate sessions between nodes
+    // =========================================================================
+
+    /**
+     * /migrate - Start bulk migration flow
+     */
+    bot.command('migrate', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.reply('❌ Admin access required.');
+            return;
+        }
+
+        // Fetch all routers
+        const result = await apiRequest('/admin', 'POST', { action: 'enumRouters' }, config.apiToken);
+        const routers = result.data?.routers || [];
+
+        if (routers.length < 2) {
+            await ctx.reply('❌ Need at least 2 nodes to migrate.\n至少需要 2 个节点才能迁移。');
+            return;
+        }
+
+        let message = `🔄 *Node Migration 节点迁移*\n\n` +
+            `Select the *source* node (migrate FROM):\n` +
+            `选择*源节点*（从哪个节点迁出）:\n\n`;
+
+        const keyboard = new InlineKeyboard();
+        for (const r of routers) {
+            const name = r.name || r.uuid;
+            const region = r.region || '';
+            keyboard.text(`📍 ${name} ${region ? `(${region})` : ''}`, `migrate:from:${r.uuid}`).row();
+        }
+        keyboard.text('🚫 Cancel 取消', 'migrate:cancel');
+
+        await ctx.reply(message, { parse_mode: 'Markdown', reply_markup: keyboard });
+    });
+
+    // Handle source node selection
+    bot.callbackQuery(/^migrate:from:(.+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.answerCallbackQuery('❌ Admin only');
+            return;
+        }
+
+        const fromRouter = ctx.match[1];
+        await ctx.answerCallbackQuery();
+
+        // Fetch routers to show targets (exclude source)
+        const result = await apiRequest('/admin', 'POST', { action: 'enumRouters' }, config.apiToken);
+        const routers = (result.data?.routers || []).filter((r: { uuid: string }) => r.uuid !== fromRouter);
+        const sourceRouter = (result.data?.routers || []).find((r: { uuid: string }) => r.uuid === fromRouter!);
+        const sourceName = sourceRouter?.name || fromRouter!.slice(0, 8);
+
+        let message = `🔄 *Migration 迁移*\n\n` +
+            `From 源: \`${sourceName}\`\n\n` +
+            `Select the *target* node (migrate TO):\n` +
+            `选择*目标节点*（迁移到哪个节点）:\n\n`;
+
+        const keyboard = new InlineKeyboard();
+        for (const r of routers) {
+            const name = r.name || r.uuid;
+            const region = r.region || '';
+            keyboard.text(`📍 ${name} ${region ? `(${region})` : ''}`, `migrate:to:${fromRouter}:${r.uuid}`).row();
+        }
+        keyboard.text('🚫 Cancel 取消', 'migrate:cancel');
+
+        await ctx.editMessageText(message, { parse_mode: 'Markdown', reply_markup: keyboard });
+    });
+
+    // Handle target node selection → dry run preview
+    bot.callbackQuery(/^migrate:to:(.+):(.+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.answerCallbackQuery('❌ Admin only');
+            return;
+        }
+
+        const fromRouter = ctx.match[1];
+        const toRouter = ctx.match[2];
+        await ctx.answerCallbackQuery('Loading preview...');
+
+        // Dry run to preview
+        const result = await apiRequest('/admin', 'POST', {
+            action: 'bulkMigrate',
+            fromRouter,
+            toRouter,
+            dryRun: true,
+        }, config.apiToken);
+
+        if (result.code !== 0) {
+            await ctx.editMessageText(`❌ Error: ${result.message}`);
+            return;
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = result.data as any;
+        const fromName = data.fromRouter as string;
+        const toName = data.toRouter as string;
+        const count = data.count as number;
+        const sessions = (data.sessions || []) as Array<{ asn: number; contact: string | null }>;
+
+        if (count === 0) {
+            await ctx.editMessageText(
+                `✅ No active sessions on \`${fromName}\`.\n` +
+                `\`${fromName}\` 上没有活跃的会话。`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        let message = `🔄 *Migration Preview 迁移预览*\n\n` +
+            `From 源: \`${fromName}\`\n` +
+            `To 目标: \`${toName}\`\n` +
+            `Sessions 会话数: *${count}*\n\n`;
+
+        for (const s of sessions.slice(0, 20)) {
+            message += `• AS${s.asn}${s.contact ? ` (${escapeMarkdown(s.contact)})` : ''}\n`;
+        }
+        if (count > 20) {
+            message += `\n...+${count - 20} more\n`;
+        }
+
+        message += `\n⚠️ *Confirm to execute migration?*\n` +
+            `确认执行迁移？所有会话将从 ${fromName} 迁移到 ${toName}。`;
+
+        const keyboard = new InlineKeyboard()
+            .text('✅ Confirm 确认迁移', `migrate:exec:${fromRouter}:${toRouter}`)
+            .text('🚫 Cancel 取消', 'migrate:cancel');
+
+        await ctx.editMessageText(message, { parse_mode: 'Markdown', reply_markup: keyboard });
+    });
+
+    // Handle migration execution
+    bot.callbackQuery(/^migrate:exec:(.+):(.+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.answerCallbackQuery('❌ Admin only');
+            return;
+        }
+
+        const fromRouter = ctx.match[1];
+        const toRouter = ctx.match[2];
+        await ctx.answerCallbackQuery('Migrating...');
+        await ctx.editMessageText('⏳ Migration in progress...\n正在执行迁移...');
+
+        const result = await apiRequest('/admin', 'POST', {
+            action: 'bulkMigrate',
+            fromRouter,
+            toRouter,
+            dryRun: false,
+        }, config.apiToken);
+
+        if (result.code !== 0) {
+            await ctx.editMessageText(`❌ Migration failed: ${result.message}\n迁移失败: ${result.message}`);
+            return;
+        }
+
+        const { fromRouter: fromName, toRouter: toName, migrated, failed, results } = result.data as {
+            fromRouter: string; toRouter: string; migrated: number; failed: number;
+            results: Array<{ asn: number; status: string; error?: string }>;
+        };
+
+        let message = `✅ *Migration Complete 迁移完成*\n\n` +
+            `From 源: \`${fromName}\`\n` +
+            `To 目标: \`${toName}\`\n\n` +
+            `✅ Migrated 已迁移: *${migrated}*\n`;
+
+        if (failed > 0) {
+            message += `❌ Failed 失败: *${failed}*\n\n`;
+            message += `*Failures:*\n`;
+            for (const r of results.filter(r => r.status === 'error')) {
+                message += `• AS${r.asn}: ${r.error}\n`;
+            }
+        }
+
+        message += `\n🔔 Use /notify to inform affected users.\n` +
+            `使用 /notify 通知受影响的用户更新配置。`;
+
+        await ctx.editMessageText(message, { parse_mode: 'Markdown' });
+
+        // Auto-notify migrated users with new endpoint info
+        if (migrated > 0) {
+            await notifyMigratedUsers(ctx, fromName, toName, results.filter(r => r.status === 'ok'));
+        }
+    });
+
+    // Handle cancel
+    bot.callbackQuery('migrate:cancel', async (ctx) => {
+        await ctx.answerCallbackQuery('Cancelled');
+        await ctx.editMessageText('🚫 Migration cancelled.\n迁移已取消。');
+    });
+
     /**
      * /sessions [status] - List BGP sessions with optional status filter
      */
@@ -895,4 +1085,71 @@ interface RouterInfo {
 interface NotificationTarget {
     asn: number;
     telegramId: number;
+}
+
+/**
+ * Notify migrated users about their session migration.
+ * Resolves ASN → telegramId via getNotificationTargets API.
+ */
+async function notifyMigratedUsers(
+    ctx: BotContext,
+    fromName: string,
+    toName: string,
+    migratedResults: Array<{ asn: number }>,
+) {
+    if (migratedResults.length === 0) return;
+
+    const asns = migratedResults.map(r => r.asn);
+
+    try {
+        // Resolve ASNs to telegram IDs
+        const targetsResult = await apiRequest('/admin', 'POST', {
+            action: 'getNotificationTargets',
+            asns,
+        }, config.apiToken);
+
+        if (targetsResult.code !== 0) {
+            console.error('[MigrateNotify] Failed to resolve targets:', targetsResult.message);
+            return;
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const targets = ((targetsResult.data as any)?.targets || []) as NotificationTarget[];
+        let sent = 0;
+
+        for (const target of targets) {
+            const message =
+                `🔄 *Peer Migration Notice*\n` +
+                `Peer 迁移通知\n\n` +
+                `Your peer \`AS${target.asn}\` has been migrated:\n` +
+                `您的 Peer \`AS${target.asn}\` 已迁移:\n\n` +
+                `📍 From 原节点: \`${fromName}\`\n` +
+                `📍 To 新节点: \`${toName}\`\n\n` +
+                `⚠️ *Action Required:*\n` +
+                `Please update your WireGuard Endpoint to the new node's address.\n` +
+                `Use \`/info\` to view your updated peer configuration.\n\n` +
+                `⚠️ *需要操作:*\n` +
+                `请更新您的 WireGuard Endpoint 为新节点地址。\n` +
+                `使用 \`/info\` 查看更新后的 Peer 配置。`;
+
+            try {
+                await ctx.api.sendMessage(target.telegramId, message, {
+                    parse_mode: 'Markdown',
+                });
+                sent++;
+            } catch (e) {
+                console.error(`[MigrateNotify] Failed to notify AS${target.asn} (${target.telegramId}):`, e);
+            }
+        }
+
+        if (sent > 0) {
+            await ctx.api.sendMessage(
+                ctx.chat!.id,
+                `📨 Migration notification sent to ${sent}/${asns.length} users.\n` +
+                `已向 ${sent}/${asns.length} 个用户发送迁移通知。`
+            );
+        }
+    } catch (error) {
+        console.error('[MigrateNotify] Error:', error);
+    }
 }
