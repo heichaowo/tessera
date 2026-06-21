@@ -221,6 +221,60 @@ async function main() {
     });
 
     console.log(`✅ Bot running on port ${port}`);
+
+    // Check for unprocessed pending requests after startup
+    await notifyPendingOnStartup(bot);
+}
+
+/**
+ * On startup, check for pending peer requests that may have been missed
+ * (e.g. during Telegram outage or bot restart) and notify admin.
+ */
+async function notifyPendingOnStartup(bot: Bot<BotContext>) {
+    if (!config.adminChatId || !config.apiUrl) return;
+
+    try {
+        const { apiRequest } = await import('./commands/peer/api');
+        const result = await apiRequest('/admin', 'POST', {
+            action: 'enumSessions',
+            status: 3, // PENDING_REVIEW
+        }, config.apiToken);
+
+        const sessions = result.data?.sessions || [];
+        if (sessions.length === 0) return;
+
+        const { InlineKeyboard } = await import('grammy');
+
+        let message = `🔔 *Startup: ${sessions.length} pending request(s)*\n` +
+            `启动检查: 有 ${sessions.length} 个待审核请求\n\n`;
+
+        const keyboard = new InlineKeyboard();
+
+        for (const s of sessions.slice(0, 10)) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const session = s as any;
+            message += `• AS${session.asn} → ${session.routerName || session.router}\n`;
+            keyboard
+                .text(`✅ AS${session.asn}`, `approve:${session.uuid}`)
+                .text(`❌`, `reject:${session.uuid}`)
+                .row();
+        }
+
+        if (sessions.length > 10) {
+            message += `\n...and ${sessions.length - 10} more`;
+        }
+
+        keyboard.text('📋 All Pending', 'admin:pending');
+
+        await bot.api.sendMessage(config.adminChatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard,
+        });
+
+        console.log(`[Startup] Notified admin about ${sessions.length} pending request(s)`);
+    } catch (error) {
+        console.error('[Startup] Failed to check pending requests:', error);
+    }
 }
 
 main();
