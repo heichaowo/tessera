@@ -774,7 +774,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
     });
 
     /**
-     * /announce <message> - Broadcast announcement to all peer users
+     * /announce <message> - Broadcast announcement with node targeting + dual channel
      */
     bot.command('announce', async (ctx) => {
         if (!isAdmin(ctx)) {
@@ -788,70 +788,281 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 `📢 *Announce 公告*\n\n` +
                 `Usage 用法:\n` +
                 `• \`/announce <message>\`\n\n` +
-                `Sends the message to all users with active peers.\n` +
-                `向所有有活跃 Peer 的用户发送消息。`,
+                `Sends the message to users with active peers (TG + Email).\n` +
+                `向有活跃 Peer 的用户发送消息（TG + Email 双通道）。`,
                 { parse_mode: 'Markdown' }
             );
             return;
         }
 
-        await ctx.reply('📢 Sending announcement...\n正在发送公告...');
+        // Fetch routers for node selection
+        const routerResult = await apiRequest('/admin', 'POST', { action: 'enumRouters' }, config.apiToken);
+        const routers = routerResult.data?.routers || [];
 
-        try {
-            // Get all notification targets
-            const result = await apiRequest('/admin', 'POST', {
-                action: 'getNotificationTargets',
+        // Store message and router order in session
+        ctx.session.announceFlow = {
+            message,
+            routerUuids: routers.map((r: { uuid: string }) => r.uuid),
+            routerNames: routers.map((r: { name: string }) => r.name),
+        };
+
+        const keyboard = new InlineKeyboard()
+            .text('🌐 All users 全部用户', 'ann:all')
+            .row();
+
+        if (routers.length > 0) {
+            keyboard.text('📍 Select nodes 选择节点', 'ann:select:' + '0'.repeat(routers.length))
+                .row();
+        }
+
+        keyboard.text('🚫 Cancel 取消', 'ann:cancel');
+
+        await ctx.reply(
+            `📢 *Announcement Preview 公告预览*\n\n` +
+            `Message 消息:\n${escapeMarkdown(message)}\n\n` +
+            `Send to all users or select specific nodes?\n` +
+            `发送给全部用户还是选择特定节点？`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+    });
+
+    // Build node selection keyboard from bitmask
+    function buildNodeKeyboard(
+        routerNames: string[],
+        bitmask: string,
+    ): InlineKeyboard {
+        const keyboard = new InlineKeyboard();
+
+        for (let i = 0; i < routerNames.length; i++) {
+            const selected = bitmask[i] === '1';
+            const label = `${selected ? '☑️' : '☐'} ${routerNames[i]}`;
+            // Toggle: flip bit at index i
+            const newBitmask = bitmask.substring(0, i) + (selected ? '0' : '1') + bitmask.substring(i + 1);
+            keyboard.text(label, `ann:t:${i}:${newBitmask}`);
+
+            // Two per row
+            if (i % 2 === 1 || i === routerNames.length - 1) {
+                keyboard.row();
+            }
+        }
+
+        const selectedCount = (bitmask.match(/1/g) || []).length;
+        keyboard.text(`✅ Done 确认选择 (${selectedCount})`, `ann:done:${bitmask}`).row();
+        keyboard.text('🚫 Cancel 取消', 'ann:cancel');
+
+        return keyboard;
+    }
+
+    // Handle "Select nodes" → show toggle keyboard
+    bot.callbackQuery(/^ann:select:(.+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery();
+
+        const bitmask = ctx.match[1]!;
+        const flow = ctx.session.announceFlow;
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+
+        const keyboard = buildNodeKeyboard(flow.routerNames, bitmask);
+
+        await ctx.editMessageText(
+            `📢 *Select Nodes 选择节点*\n\n` +
+            `Message 消息:\n${escapeMarkdown(flow.message)}\n\n` +
+            `Tap nodes to toggle selection:\n` +
+            `点击节点切换选中状态：`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+    });
+
+    // Handle toggle button
+    bot.callbackQuery(/^ann:t:(\d+):(.+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        const selectedCount = (ctx.match[2]!.match(/1/g) || []).length;
+        await ctx.answerCallbackQuery(`${selectedCount} node(s) selected`);
+
+        const bitmask = ctx.match[2]!;
+        const flow = ctx.session.announceFlow;
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+
+        const keyboard = buildNodeKeyboard(flow.routerNames, bitmask);
+
+        await ctx.editMessageText(
+            `📢 *Select Nodes 选择节点*\n\n` +
+            `Message 消息:\n${escapeMarkdown(flow.message)}\n\n` +
+            `Tap nodes to toggle selection:\n` +
+            `点击节点切换选中状态：`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+    });
+
+    // Handle "Done" → preview targets, then confirm
+    bot.callbackQuery(/^ann:done:(.+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery('Loading preview...');
+
+        const bitmask = ctx.match[1]!;
+        const flow = ctx.session.announceFlow;
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+
+        const selectedCount = (bitmask.match(/1/g) || []).length;
+        if (selectedCount === 0) {
+            await ctx.answerCallbackQuery('⚠️ Select at least 1 node');
+            return;
+        }
+
+        // Resolve selected router UUIDs and store in session
+        const selectedRouters = flow.routerUuids.filter((_: string, i: number) => bitmask[i] === '1');
+        const selectedNames = flow.routerNames.filter((_: string, i: number) => bitmask[i] === '1');
+        ctx.session.announceFlow = { ...flow, selectedRouters };
+
+        await sendAnnouncePreview(ctx, flow.message, selectedRouters, selectedNames);
+    });
+
+    // Handle "All users"
+    bot.callbackQuery('ann:all', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery('Loading preview...');
+
+        const flow = ctx.session.announceFlow;
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+
+        ctx.session.announceFlow = { ...flow, selectedRouters: [] };
+        await sendAnnouncePreview(ctx, flow.message, [], []);
+    });
+
+    // Shared: fetch targets → show confirm
+    async function sendAnnouncePreview(
+        ctx: BotContext,
+        message: string,
+        routers: string[],
+        routerNames: string[],
+    ) {
+        const result = await apiRequest('/admin', 'POST', {
+            action: 'getNotificationTargets',
+            ...(routers.length > 0 ? { routers } : {}),
+        }, config.apiToken);
+
+        if (result.code !== 0) {
+            await ctx.editMessageText(`❌ Error: ${result.message}`);
+            return;
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = result.data as any;
+        const tgTargets = (data?.targets || []) as NotificationTarget[];
+        const emailTargets = (data?.emailFallbacks || []) as Array<{ asn: number; email: string }>;
+
+        const scope = routerNames.length > 0
+            ? `Nodes 节点: ${routerNames.join(', ')}`
+            : 'All nodes 全部节点';
+
+        let preview = `📢 *Announcement Confirm 确认发送*\n\n` +
+            `${scope}\n\n` +
+            `Message 消息:\n${escapeMarkdown(message)}\n\n` +
+            `📱 Telegram: *${tgTargets.length}* users\n` +
+            `📧 Email: *${emailTargets.length}* users\n` +
+            `👥 Total 总计: *${tgTargets.length + emailTargets.length}* unique users`;
+
+        if (tgTargets.length === 0 && emailTargets.length === 0) {
+            preview += `\n\n⚠️ No reachable users found.\n未找到可通知的用户。`;
+            await ctx.editMessageText(preview, { parse_mode: 'Markdown' });
+            return;
+        }
+
+        // Store in session, use simple callback_data (64-byte limit)
+        const keyboard = new InlineKeyboard()
+            .text('✅ Send 发送', 'ann:send')
+            .text('🚫 Cancel 取消', 'ann:cancel');
+
+        await ctx.editMessageText(preview, { parse_mode: 'Markdown', reply_markup: keyboard });
+    }
+
+    // Handle send confirm
+    bot.callbackQuery('ann:send', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery('Sending...');
+
+        const flow = ctx.session.announceFlow;
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+
+        const routers = flow.selectedRouters || [];
+
+        await ctx.editMessageText('⏳ Sending announcement...\n正在发送公告...');
+
+        // Fetch targets
+        const result = await apiRequest('/admin', 'POST', {
+            action: 'getNotificationTargets',
+            ...(routers.length > 0 ? { routers } : {}),
+        }, config.apiToken);
+
+        if (result.code !== 0) {
+            await ctx.editMessageText(`❌ Failed: ${result.message}`);
+            return;
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = result.data as any;
+        const tgTargets = (data?.targets || []) as NotificationTarget[];
+        const emailTargets = (data?.emailFallbacks || []) as Array<{ asn: number; email: string }>;
+
+        const adminTgId = ctx.from?.id;
+        let tgSent = 0;
+        let tgFailed = 0;
+        const failedAsns: number[] = [];
+
+        // Send TG messages
+        for (const target of tgTargets) {
+            if (target.telegramId === adminTgId) continue;
+            try {
+                await ctx.api.sendMessage(
+                    target.telegramId,
+                    `📢 *MoeNet Announcement 公告*\n\n${escapeMarkdown(flow.message)}`,
+                    { parse_mode: 'Markdown' }
+                );
+                tgSent++;
+            } catch (error) {
+                console.error(`[Announce] TG failed AS${target.asn}:`, error);
+                tgFailed++;
+                failedAsns.push(target.asn);
+            }
+        }
+
+        // Send emails via API
+        let emailSent = 0;
+        let emailFailed = 0;
+        if (emailTargets.length > 0) {
+            const emailResult = await apiRequest('/admin', 'POST', {
+                action: 'sendBulkEmail',
+                message: flow.message,
+                targets: emailTargets,
             }, config.apiToken);
 
-            if (result.code !== 0) {
-                await ctx.reply(`❌ Failed to get targets: ${result.message}`);
-                return;
-            }
-
-            const targets = (result.data as unknown as { targets: NotificationTarget[] })?.targets || [];
-
-            if (targets.length === 0) {
-                await ctx.reply('ℹ️ No users with registered Telegram IDs found.\n未找到已注册 Telegram ID 的用户。');
-                return;
-            }
-
-            const adminTgId = ctx.from?.id;
-            let sent = 0;
-            let failed = 0;
-            const failedAsns: number[] = [];
-
-            for (const target of targets) {
-                // Skip sending to admin themselves
-                if (target.telegramId === adminTgId) continue;
-
-                try {
-                    await ctx.api.sendMessage(
-                        target.telegramId,
-                        `📢 *MoeNet Announcement 公告*\n\n${escapeMarkdown(message)}`,
-                        { parse_mode: 'Markdown' }
-                    );
-                    sent++;
-                } catch (error) {
-                    console.error(`[Announce] Failed to send to AS${target.asn} (tgId: ${target.telegramId}):`, error);
-                    failed++;
-                    failedAsns.push(target.asn);
-                }
-            }
-
-            let report = `📢 *Announcement Report 公告报告*\n\n` +
-                `✅ Sent 已发送: ${sent}\n` +
-                `❌ Failed 失败: ${failed}\n` +
-                `👥 Total targets 目标总数: ${targets.length}`;
-
-            if (failedAsns.length > 0) {
-                report += `\n\nFailed ASNs 失败的 ASN: ${failedAsns.map(a => `AS${a}`).join(', ')}`;
-            }
-
-            await ctx.reply(report, { parse_mode: 'Markdown' });
-        } catch (error) {
-            console.error('[Announce] Error:', error);
-            await ctx.reply('❌ Announcement failed.');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const emailData = emailResult.data as any;
+            emailSent = emailData?.sent || 0;
+            emailFailed = emailData?.failed || 0;
         }
+
+        // Report
+        let report = `📢 *Announcement Report 公告报告*\n\n` +
+            `📱 TG: ✅ ${tgSent} sent, ❌ ${tgFailed} failed\n` +
+            `📧 Email: ✅ ${emailSent} sent, ❌ ${emailFailed} failed\n` +
+            `👥 Total reached 总到达: *${tgSent + emailSent}*`;
+
+        if (failedAsns.length > 0) {
+            report += `\n\nTG failed: ${failedAsns.map(a => `AS${a}`).join(', ')}`;
+        }
+
+        await ctx.editMessageText(report, { parse_mode: 'Markdown' });
+
+        // Clear session
+        ctx.session.announceFlow = undefined;
+    });
+
+    // Handle cancel
+    bot.callbackQuery('ann:cancel', async (ctx) => {
+        await ctx.answerCallbackQuery('Cancelled');
+        await ctx.editMessageText('🚫 Announcement cancelled.\n公告已取消。');
+        ctx.session.announceFlow = undefined;
     });
 
     /**

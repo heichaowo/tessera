@@ -139,6 +139,8 @@ export default async function adminHandler(c: Context): Promise<Response> {
             return await registerTelegramId(c, body);
         case 'getNotificationTargets':
             return await getNotificationTargets(c, body);
+        case 'sendBulkEmail':
+            return await sendBulkEmail(c, body);
         default:
             return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Invalid action');
     }
@@ -1443,7 +1445,7 @@ async function registerTelegramId(
  */
 async function getNotificationTargets(
     c: Context,
-    body: { asns?: number[] }
+    body: { asns?: number[]; routers?: string[] }
 ): Promise<Response> {
     const models = getModels();
 
@@ -1454,11 +1456,18 @@ async function getNotificationTargets(
             // Targeted notification: query users directly by ASN (no bgp_sessions filter)
             targetAsns = body.asns.map(Number);
         } else {
-            // Broadcast: find ASNs with active or problematic sessions
+            // Build where clause for bgp_sessions
+            const sessionWhere: Record<string, unknown> = {
+                status: { [Op.in]: [PeeringStatus.ENABLED, PeeringStatus.QUEUED_FOR_SETUP, PeeringStatus.PROBLEM] },
+            };
+
+            // Optional: filter by specific routers (for node-targeted announcements)
+            if (body.routers && body.routers.length > 0) {
+                sessionWhere.router = { [Op.in]: body.routers };
+            }
+
             const sessions = await models.bgpSessions.findAll({
-                where: {
-                    status: { [Op.in]: [PeeringStatus.ENABLED, PeeringStatus.QUEUED_FOR_SETUP, PeeringStatus.PROBLEM] },
-                },
+                where: sessionWhere,
                 attributes: ['asn'],
                 group: ['asn'],
             });
@@ -1543,3 +1552,54 @@ async function getNotificationTargets(
     }
 }
 
+/**
+ * Send announcement emails in bulk.
+ * Called by the bot after sending TG messages.
+ */
+async function sendBulkEmail(c: Context, body: {
+    subject?: string;
+    message?: string;
+    targets?: Array<{ asn: number; email: string }>;
+}): Promise<Response> {
+    const { subject, message, targets } = body;
+
+    if (!message || !targets || targets.length === 0) {
+        return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined, 'Missing message or targets');
+    }
+
+    const emailProvider = getEmailProvider();
+    if (!emailProvider.isEnabled()) {
+        return success(c, { sent: 0, warning: 'Email service not configured' });
+    }
+
+    const emailSubject = subject || '[MoeNet DN42] Announcement';
+    let sent = 0;
+    let failed = 0;
+    const errors: Array<{ asn: number; error: string }> = [];
+
+    for (const target of targets) {
+        const text =
+            `MoeNet DN42 Announcement\n` +
+            `========================\n\n` +
+            `${message}\n\n` +
+            `---\n` +
+            `This email was sent to AS${target.asn}.\n` +
+            `MoeNet DN42 - https://dn42.moenet.work`;
+
+        const result = await emailProvider.send({
+            to: target.email,
+            subject: emailSubject,
+            text,
+        });
+
+        if (result.success) {
+            sent++;
+        } else {
+            failed++;
+            errors.push({ asn: target.asn, error: result.error || 'Unknown error' });
+        }
+    }
+
+    console.log(`[Admin] Bulk email: ${sent} sent, ${failed} failed`);
+    return success(c, { sent, failed, errors });
+}

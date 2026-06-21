@@ -76,6 +76,14 @@ interface SessionData {
         step: 'name' | 'hostname' | 'ipv4' | 'ipv6' | 'role' | 'region' | 'location' | 'provider' | 'bandwidth' | 'max_peers' | 'allow_cn' | 'confirm';
         data: Record<string, unknown>;
     };
+    /** Announce flow: message + router UUID order for bitmask */
+    announceFlow?: {
+        message: string;
+        routerUuids: string[];
+        routerNames: string[];
+        /** Router UUIDs selected for targeted announce. Empty = all. */
+        selectedRouters?: string[];
+    };
     /** Set to true after telegramId has been registered to DB for this session */
     _registered?: boolean;
 }
