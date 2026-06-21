@@ -3,10 +3,10 @@ import { DataTypes, type ModelStatic, type Model, type Sequelize } from 'sequeli
 export interface UserAttributes {
     id: number;
     asn: number;
-    email: string | null;
     telegramId: number | null;
+    person: string | null;
     isAdmin: boolean;
-    isBanned: boolean;
+    isBlocked: boolean;
     createdAt?: Date;
     updatedAt?: Date;
 }
@@ -25,15 +25,15 @@ export function initUsersModel(sequelize: Sequelize): UsersModel {
             allowNull: false,
             unique: true,
         },
-        email: {
-            type: DataTypes.STRING,
-            allowNull: true,
-        },
         telegramId: {
             field: 'telegram_id',
             type: DataTypes.BIGINT,
             allowNull: true,
             unique: true,
+        },
+        person: {
+            type: DataTypes.STRING,
+            allowNull: true,
         },
         isAdmin: {
             field: 'is_admin',
@@ -41,8 +41,8 @@ export function initUsersModel(sequelize: Sequelize): UsersModel {
             allowNull: false,
             defaultValue: false,
         },
-        isBanned: {
-            field: 'is_banned',
+        isBlocked: {
+            field: 'is_blocked',
             type: DataTypes.BOOLEAN,
             allowNull: false,
             defaultValue: false,

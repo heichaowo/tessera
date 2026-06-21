@@ -1256,7 +1256,7 @@ async function registerTelegramId(
                 asn: Number(asn),
                 telegramId: Number(telegramId),
                 isAdmin: false,
-                isBanned: false,
+                isBlocked: false,
             } as any,
         });
 
@@ -1283,31 +1283,31 @@ async function getNotificationTargets(
     const models = getModels();
 
     try {
-        // Find ASNs with active or problematic sessions
-        // Include PROBLEM and QUEUED_FOR_SETUP so those users can also receive notifications
-        const sessionWhere: Record<string, unknown> = {
-            status: { [Op.in]: [PeeringStatus.ENABLED, PeeringStatus.QUEUED_FOR_SETUP, PeeringStatus.PROBLEM] },
-        };
+        let targetAsns: number[];
+
         if (body.asns && body.asns.length > 0) {
-            sessionWhere.asn = { [Op.in]: body.asns.map(Number) };
+            // Targeted notification: query users directly by ASN (no bgp_sessions filter)
+            targetAsns = body.asns.map(Number);
+        } else {
+            // Broadcast: find ASNs with active or problematic sessions
+            const sessions = await models.bgpSessions.findAll({
+                where: {
+                    status: { [Op.in]: [PeeringStatus.ENABLED, PeeringStatus.QUEUED_FOR_SETUP, PeeringStatus.PROBLEM] },
+                },
+                attributes: ['asn'],
+                group: ['asn'],
+            });
+            targetAsns = sessions.map(s => s.get('asn') as number);
         }
 
-        const sessions = await models.bgpSessions.findAll({
-            where: sessionWhere,
-            attributes: ['asn'],
-            group: ['asn'],
-        });
-
-        const activeAsns = sessions.map(s => s.get('asn') as number);
-
-        if (activeAsns.length === 0) {
+        if (targetAsns.length === 0) {
             return success(c, { targets: [] });
         }
 
         // Find users with telegramId for those ASNs
         const users = await models.users.findAll({
             where: {
-                asn: { [Op.in]: activeAsns },
+                asn: { [Op.in]: targetAsns },
                 telegramId: { [Op.ne]: null },
             },
         });
@@ -1317,9 +1317,37 @@ async function getNotificationTargets(
             telegramId: u.get('telegramId') as number,
         }));
 
-        return success(c, { targets });
+        // For ASNs not in users table, try to find email contacts from bgp_sessions
+        const foundAsns = new Set(targets.map(t => t.asn));
+        const missingAsns = targetAsns.filter(a => !foundAsns.has(a));
+
+        const emailFallbacks: Array<{ asn: number; email: string }> = [];
+        if (missingAsns.length > 0) {
+            const sessions = await models.bgpSessions.findAll({
+                where: {
+                    asn: { [Op.in]: missingAsns },
+                    contact: { [Op.ne]: null },
+                },
+                attributes: ['asn', 'contact'],
+                group: ['asn', 'contact'],
+            });
+
+            for (const s of sessions) {
+                const contact = (s.get('contact') as string || '').trim();
+                // Extract email addresses from contact field
+                if (contact.includes('@') && !contact.startsWith('@') && !contact.startsWith('telegram:')) {
+                    emailFallbacks.push({
+                        asn: s.get('asn') as number,
+                        email: contact,
+                    });
+                }
+            }
+        }
+
+        return success(c, { targets, emailFallbacks });
     } catch (error) {
         console.error('[Admin] Error getting notification targets:', error);
         return makeResponse(c, ResponseCode.INTERNAL_ERROR, undefined, 'Failed to get notification targets');
     }
 }
+
