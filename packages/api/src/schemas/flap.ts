@@ -7,7 +7,7 @@
  * Reference: https://github.com/Kioubit/FlapAlerted/blob/master/analyze/eventTypes.go
  */
 
-import { z } from 'zod';
+import { z } from "zod";
 
 /**
  * FlapAlerted FlapEvent payload (same struct for both alert and resolved)
@@ -21,12 +21,12 @@ import { z } from 'zod';
  * - PathHistory: PathTrackerSummary (complex nested object)
  */
 export const FlapEventSchema = z.object({
-    Prefix: z.string().min(1, 'Prefix is required'),
-    TotalPathChanges: z.number().int().nonnegative().optional().default(0),
-    RateSec: z.number().optional().default(0),
-    RateSecHistory: z.array(z.number()).optional().default([]),
-    FirstSeen: z.number().int().optional().default(0),
-    PathHistory: z.unknown().optional(),
+	Prefix: z.string().min(1, "Prefix is required"),
+	TotalPathChanges: z.number().int().nonnegative().optional().default(0),
+	RateSec: z.number().optional().default(0),
+	RateSecHistory: z.array(z.number()).optional().default([]),
+	FirstSeen: z.number().int().optional().default(0),
+	PathHistory: z.unknown().optional(),
 });
 
 export type FlapEventInput = z.infer<typeof FlapEventSchema>;
@@ -35,11 +35,11 @@ export type FlapEventInput = z.infer<typeof FlapEventSchema>;
  * Stored flap event (enriched with metadata for Redis)
  */
 export interface StoredFlapEvent {
-    type: 'alert' | 'resolved';
-    prefix: string;
-    totalPathChanges: number;
-    rateSec: number;
-    firstSeen: number;
-    durationMinutes: number | null;
-    timestamp: number;
+	type: "alert" | "resolved";
+	prefix: string;
+	totalPathChanges: number;
+	rateSec: number;
+	firstSeen: number;
+	durationMinutes: number | null;
+	timestamp: number;
 }
