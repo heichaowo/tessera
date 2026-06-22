@@ -442,7 +442,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
         const query = ctx.match?.trim();
 
         if (!query) {
-            await ctx.reply('用法: /whois <ASN/IP/name>\n例如: /whois AS4242420998');
+            await ctx.reply('用法: /whois <ASN/IP/name>\n例如: /whois 998, AS4242420998, 172.23.0.80');
             return;
         }
 
@@ -512,7 +512,7 @@ export function registerToolsCommands(bot: Bot<BotContext>) {
         const query = ctx.match?.trim();
 
         if (!query || !isAsnInput(query)) {
-            await ctx.reply('用法: /findnoc <ASN>\n例如: /findnoc 4242420998');
+            await ctx.reply('用法: /findnoc <ASN>\n例如: /findnoc 998, 0998, AS4242420998');
             return;
         }
 

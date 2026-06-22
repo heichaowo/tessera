@@ -470,7 +470,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
         await ctx.reply(
             `${ICONS.login} *DN42 Login 登录*\n${DIVIDER}\n` +
             `Enter your ASN\n请输入你的 ASN\n\n` +
-            `Example: \`AS4242420998\` or \`4242420998\`\n\n` +
+            `Example: \`998\`, \`0998\`, \`AS4242420998\` or \`4242420998\`\n\n` +
             `/cancel to abort 取消`,
             { parse_mode: 'Markdown' }
         );
@@ -494,7 +494,7 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
         // Check if it looks like an ASN
         if (!isAsnInput(text)) {
-            await ctx.reply(`${ICONS.error} Invalid ASN format. Example: 4242420998 or 0998\n无效的 ASN 格式。`);
+            await ctx.reply(`${ICONS.error} Invalid ASN format. Example: 998, 0998, AS4242420998\n无效的 ASN 格式。`);
             return;
         }
 
