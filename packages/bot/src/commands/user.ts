@@ -14,7 +14,6 @@ import {
     formatTemplate,
     LOGIN_SUCCESS,
     LOGIN_SIGNATURE_CHALLENGE,
-    CANCELLED,
 } from '../templates';
 import {
     START_WELCOME,
@@ -429,10 +428,13 @@ export function registerUserCommands(bot: Bot<BotContext>) {
             ctx.session.isAdmin = true;
         }
 
-        // Send welcome message (plain text with link preview)
-        await ctx.reply(START_WELCOME, { link_preview_options: { is_disabled: false } });
+        // Send welcome message (MarkdownV2 for links and formatting)
+        await ctx.reply(START_WELCOME, {
+            parse_mode: 'MarkdownV2',
+            link_preview_options: { is_disabled: true },
+        });
 
-        // Send command list as second message (with code block)
+        // Send command list as second message
         await ctx.reply(START_COMMANDS, { parse_mode: 'Markdown' });
     });
 
@@ -441,12 +443,21 @@ export function registerUserCommands(bot: Bot<BotContext>) {
      */
     bot.command('cancel', async (ctx) => {
         const userId = ctx.from?.id;
+        let hadFlow = false;
+
         if (userId) {
             challengeStore.delete(userId);
-            ctx.session.awaitingAsn = false;
+            if (ctx.session.awaitingAsn) { ctx.session.awaitingAsn = false; hadFlow = true; }
         }
+        // Clean up admin flows
+        if (ctx.session.announceFlow) { ctx.session.announceFlow = undefined; hadFlow = true; }
+        if (ctx.session.notifyFlow) { ctx.session.notifyFlow = undefined; hadFlow = true; }
+        if (ctx.session.awaitingInfoAsn) { ctx.session.awaitingInfoAsn = false; hadFlow = true; }
+
         await ctx.reply(
-            `${ICONS.cancel} Operation cancelled. No ongoing operations.\n操作已取消。没有正在进行的操作。`
+            hadFlow
+                ? `${ICONS.cancel} Operation cancelled.\n操作已取消。`
+                : `${ICONS.cancel} No ongoing operations.\n没有正在进行的操作。`
         );
     });
 
@@ -467,13 +478,25 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
         // Mark that we're awaiting ASN input
         ctx.session.awaitingAsn = true;
+
+        const keyboard = new InlineKeyboard()
+            .text('🚫 Cancel 取消', 'login:cancel');
+
         await ctx.reply(
             `${ICONS.login} *DN42 Login 登录*\n${DIVIDER}\n` +
             `Enter your ASN\n请输入你的 ASN\n\n` +
-            `Example: \`998\`, \`0998\`, \`AS4242420998\` or \`4242420998\`\n\n` +
-            `/cancel to abort 取消`,
-            { parse_mode: 'Markdown' }
+            `Example: \`998\`, \`0998\`, \`AS4242420998\` or \`4242420998\``,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
         );
+    });
+
+    // login:cancel → abort login flow
+    bot.callbackQuery('login:cancel', async (ctx) => {
+        const userId = ctx.from?.id;
+        if (userId) challengeStore.delete(userId);
+        ctx.session.awaitingAsn = false;
+        await ctx.answerCallbackQuery();
+        await ctx.editMessageText(`${ICONS.cancel} Login cancelled.\n登录已取消。`);
     });
 
     // Handle ASN input for login
@@ -485,11 +508,10 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
         const text = ctx.message.text.trim();
 
-        // Cancel
-        if (text === '/cancel') {
+        // If a command, cancel login and pass through
+        if (text.startsWith('/')) {
             ctx.session.awaitingAsn = false;
-            await ctx.reply(`${ICONS.cancel} ${CANCELLED}`);
-            return;
+            return next();
         }
 
         // Check if it looks like an ASN
@@ -582,10 +604,12 @@ export function registerUserCommands(bot: Bot<BotContext>) {
                 attempts: 0,
             });
 
+            keyboard.text('🚫 Cancel 取消', 'login:cancel').row();
+
             await ctx.reply(
                 `👤 *${person}* (AS${asn})\n\n` +
-                `Choose authentication method. Use /cancel to interrupt.\n` +
-                `选择验证方式。使用 /cancel 终止操作。`,
+                `Choose authentication method.\n` +
+                `选择验证方式。`,
                 {
                     parse_mode: 'Markdown',
                     reply_markup: keyboard,
@@ -810,11 +834,10 @@ export function registerUserCommands(bot: Bot<BotContext>) {
 
         const text = ctx.message.text.trim();
 
-        // Cancel
-        if (text === '/cancel') {
+        // If a command, clean up and pass through
+        if (text.startsWith('/')) {
             challengeStore.delete(userId);
-            await ctx.reply(`${ICONS.cancel} ${CANCELLED}`);
-            return;
+            return next();
         }
 
         const { asn, mntBy, challenge, method } = stored;

@@ -83,6 +83,8 @@ interface SessionData {
         routerNames: string[];
         /** Router UUIDs selected for targeted announce. Empty = all. */
         selectedRouters?: string[];
+        /** Cached target user count for menu display */
+        targetCount?: { tg: number; email: number };
         /** Failed TG targets for retry */
         failedTg?: Array<{ asn: number; telegramId: number }>;
         /** Failed email targets for retry */

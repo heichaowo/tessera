@@ -804,10 +804,15 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 : `📍 ${flow.selectedRouters.length} node(s) 节点`)
             : '❌ Not set 未选择';
 
+        const targetInfo = flow.targetCount
+            ? `\nTargets 用户: 👥 ${flow.targetCount.tg + flow.targetCount.email} (📱TG ${flow.targetCount.tg} + 📧Email ${flow.targetCount.email})`
+            : '';
+
         const text =
             `📢 *Announce 公告*\n${DIVIDER}\n` +
             `Content 内容: ${escapeMarkdown(msgStatus)}\n` +
-            `Scope 范围: ${escapeMarkdown(nodeStatus)}`;
+            `Scope 范围: ${escapeMarkdown(nodeStatus)}` +
+            targetInfo;
 
         const keyboard = new InlineKeyboard()
             .text(`📝 ${flow.message ? 'Edit' : 'Set'} Content ${flow.message ? '修改' : '填写'}内容`, 'ann:msg')
@@ -842,13 +847,27 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         if (!ctx.session.announceFlow) return;
         ctx.session.announceFlow.awaitingMessage = true;
 
+        const keyboard = new InlineKeyboard()
+            .text('⬅️ Back 返回', 'ann:back');
+
         await ctx.editMessageText(
             `📢 *Announce — Content 内容*\n${DIVIDER}\n` +
             `Enter announcement message below.\n` +
-            `请输入公告内容。\n\n` +
-            `/cancel to go back\n/cancel 返回`,
-            { parse_mode: 'Markdown' }
+            `请输入公告内容。`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
         );
+    });
+
+    // ann:back → return to announce menu
+    bot.callbackQuery('ann:back', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery();
+        if (!ctx.session.announceFlow) {
+            await ctx.editMessageText('❌ Session expired. Run /announce again.\n会话已过期，请重新执行 /announce');
+            return;
+        }
+        ctx.session.announceFlow.awaitingMessage = false;
+        await showAnnounceMenu(ctx, true);
     });
 
     // Handle text input for announce message
@@ -858,12 +877,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         const text = ctx.message.text.trim();
 
-        if (text === '/cancel') {
-            flow.awaitingMessage = false;
-            await showAnnounceMenu(ctx);
-            return;
-        }
-
+        // If a command, cancel flow and pass through
         if (text.startsWith('/')) {
             ctx.session.announceFlow = undefined;
             return next();
@@ -961,7 +975,8 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         // Resolve selected router UUIDs and store in session
         const selectedRouters = flow.routerUuids.filter((_: string, i: number) => bitmask[i] === '1');
-        ctx.session.announceFlow = { ...flow, selectedRouters };
+        const targetCount = await fetchTargetCount(selectedRouters);
+        ctx.session.announceFlow = { ...flow, selectedRouters, targetCount };
 
         // If message is filled → go to preview; otherwise → back to menu
         if (flow.message) {
@@ -980,7 +995,8 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         const flow = ctx.session.announceFlow;
         if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.\n会话已过期，请重新执行 /announce'); return; }
 
-        ctx.session.announceFlow = { ...flow, selectedRouters: [] };
+        const targetCount = await fetchTargetCount([]);
+        ctx.session.announceFlow = { ...flow, selectedRouters: [], targetCount };
 
         // If message is filled → go to preview; otherwise → back to menu
         if (flow.message) {
@@ -989,6 +1005,27 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             await showAnnounceMenu(ctx, true);
         }
     });
+
+    /** Fetch target user count for given routers (empty = all) */
+    async function fetchTargetCount(routers: string[]): Promise<{ tg: number; email: number }> {
+        try {
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'getNotificationTargets',
+                ...(routers.length > 0 ? { routers } : {}),
+            }, config.apiToken);
+
+            if (result.code === 0) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const data = result.data as any;
+                const tg = ((data?.targets || []) as NotificationTarget[]).length;
+                const email = ((data?.emailFallbacks || []) as Array<{ asn: number; email: string }>).length;
+                return { tg, email };
+            }
+        } catch {
+            // Non-critical, return zeros
+        }
+        return { tg: 0, email: 0 };
+    }
 
     // Handle "Preview & Send" from main menu
     bot.callbackQuery('ann:preview', async (ctx) => {
@@ -1362,12 +1399,14 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         if (!ctx.session.notifyFlow) ctx.session.notifyFlow = {};
         ctx.session.notifyFlow.awaitingMessage = true;
 
+        const keyboard = new InlineKeyboard()
+            .text('⬅️ Back 返回', 'ntf:back');
+
         await ctx.editMessageText(
             `🔔 *Notify — Content 内容*\n${DIVIDER}\n` +
             `Enter notification message below.\n` +
-            `请输入通知内容。\n\n` +
-            `/cancel to go back\n/cancel 返回`,
-            { parse_mode: 'Markdown' }
+            `请输入通知内容。`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
         );
     });
 
@@ -1379,14 +1418,29 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         if (!ctx.session.notifyFlow) ctx.session.notifyFlow = {};
         ctx.session.notifyFlow.awaitingAsns = true;
 
+        const keyboard = new InlineKeyboard()
+            .text('⬅️ Back 返回', 'ntf:back');
+
         await ctx.editMessageText(
             `🔔 *Notify — Targets 目标*\n${DIVIDER}\n` +
             `Enter ASN(s), comma separated.\n` +
             `请输入 ASN，逗号分隔。\n\n` +
-            `Example 示例: \`998\`, \`0998,1234\`\n\n` +
-            `/cancel to go back\n/cancel 返回`,
-            { parse_mode: 'Markdown' }
+            `Example 示例: \`998\`, \`0998,1234\``,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
         );
+    });
+
+    // ntf:back → return to notify menu
+    bot.callbackQuery('ntf:back', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery();
+        if (!ctx.session.notifyFlow) {
+            await ctx.editMessageText('❌ Session expired. Run /notify again.\n会话已过期，请重新执行 /notify');
+            return;
+        }
+        ctx.session.notifyFlow.awaitingMessage = false;
+        ctx.session.notifyFlow.awaitingAsns = false;
+        await showNotifyMenu(ctx, true);
     });
 
     // Handle text input for notify flow
@@ -1396,15 +1450,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         const text = ctx.message.text.trim();
 
-        // Handle cancel
-        if (text === '/cancel') {
-            flow.awaitingMessage = false;
-            flow.awaitingAsns = false;
-            await showNotifyMenu(ctx);
-            return;
-        }
-
-        // If another command, cancel flow and pass through
+        // If a command, cancel flow and pass through
         if (text.startsWith('/')) {
             ctx.session.notifyFlow = undefined;
             return next();
