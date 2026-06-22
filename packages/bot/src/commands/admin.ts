@@ -6,6 +6,7 @@ import { apiRequest } from '../api';
 import { isAdmin } from '../guards';
 import { calculatePort, normalizeAsn, isAsnInput } from './peer/validators';
 import { fetchContacts } from '../services/dn42Registry';
+import { DIVIDER } from '../templates';
 
 /**
  * Escape Telegram Markdown v1 special characters in user-supplied text.
@@ -768,52 +769,110 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
      */
     bot.command('announce', async (ctx) => {
         if (!isAdmin(ctx)) {
-            await ctx.reply('❌ Admin access required.');
+            await ctx.reply('❌ Admin access required.\n需要管理员权限。');
             return;
         }
 
-        const message = ctx.match?.trim();
-        if (!message) {
-            await ctx.reply(
-                `📢 *Announce 公告*\n\n` +
-                `Usage 用法:\n` +
-                `• \`/announce <message>\`\n\n` +
-                `Sends the message to users with active peers (TG + Email).\n` +
-                `向有活跃 Peer 的用户发送消息（TG + Email 双通道）。`,
-                { parse_mode: 'Markdown' }
-            );
-            return;
-        }
-
-        // Fetch routers for node selection
+        // Fetch routers for node selection (needed for both paths)
         const routerResult = await apiRequest('/admin', 'POST', { action: 'enumRouters' }, config.apiToken);
         const routers = routerResult.data?.routers || [];
 
-        // Store message and router order in session
+        const message = ctx.match?.trim() || undefined;
+
+        // Init flow with optional pre-filled message
         ctx.session.announceFlow = {
             message,
             routerUuids: routers.map((r: { uuid: string }) => r.uuid),
             routerNames: routers.map((r: { name: string }) => r.name),
         };
 
+        await showAnnounceMenu(ctx);
+    });
+
+    /** Build and display the announce main menu */
+    async function showAnnounceMenu(ctx: BotContext, editMessage = false) {
+        const flow = ctx.session.announceFlow;
+        if (!flow) return;
+
+        const msgStatus = flow.message
+            ? `✅ ${flow.message.length > 40 ? flow.message.slice(0, 40) + '...' : flow.message}`
+            : '❌ Not set 未填写';
+
+        const nodeStatus = flow.selectedRouters !== undefined
+            ? (flow.selectedRouters.length === 0
+                ? '🌐 All nodes 全部节点'
+                : `📍 ${flow.selectedRouters.length} node(s) 节点`)
+            : '❌ Not set 未选择';
+
+        const text =
+            `📢 *Announce 公告*\n${DIVIDER}\n` +
+            `Content 内容: ${escapeMarkdown(msgStatus)}\n` +
+            `Scope 范围: ${escapeMarkdown(nodeStatus)}`;
+
         const keyboard = new InlineKeyboard()
+            .text(`📝 ${flow.message ? 'Edit' : 'Set'} Content ${flow.message ? '修改' : '填写'}内容`, 'ann:msg')
+            .row()
             .text('🌐 All users 全部用户', 'ann:all')
             .row();
 
-        if (routers.length > 0) {
-            keyboard.text('📍 Select nodes 选择节点', 'ann:select:' + '0'.repeat(routers.length))
+        if (flow.routerNames.length > 0) {
+            keyboard.text('📍 Select nodes 选择节点', 'ann:select:' + '0'.repeat(flow.routerNames.length))
                 .row();
+        }
+
+        // Only show preview if message is filled
+        if (flow.message && flow.selectedRouters !== undefined) {
+            keyboard.text('✅ Preview & Send 预览发送', 'ann:preview').row();
         }
 
         keyboard.text('🚫 Cancel 取消', 'ann:cancel');
 
-        await ctx.reply(
-            `📢 *Announcement Preview 公告预览*\n\n` +
-            `Message 消息:\n${escapeMarkdown(message)}\n\n` +
-            `Send to all users or select specific nodes?\n` +
-            `发送给全部用户还是选择特定节点？`,
-            { parse_mode: 'Markdown', reply_markup: keyboard }
+        if (editMessage) {
+            await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+        } else {
+            await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+        }
+    }
+
+    // ann:msg → ask for message text
+    bot.callbackQuery('ann:msg', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery();
+
+        if (!ctx.session.announceFlow) return;
+        ctx.session.announceFlow.awaitingMessage = true;
+
+        await ctx.editMessageText(
+            `📢 *Announce — Content 内容*\n${DIVIDER}\n` +
+            `Enter announcement message below.\n` +
+            `请输入公告内容。\n\n` +
+            `/cancel to go back\n/cancel 返回`,
+            { parse_mode: 'Markdown' }
         );
+    });
+
+    // Handle text input for announce message
+    bot.on('message:text', async (ctx, next) => {
+        const flow = ctx.session.announceFlow;
+        if (!flow?.awaitingMessage) return next();
+
+        const text = ctx.message.text.trim();
+
+        if (text === '/cancel') {
+            flow.awaitingMessage = false;
+            await showAnnounceMenu(ctx);
+            return;
+        }
+
+        if (text.startsWith('/')) {
+            ctx.session.announceFlow = undefined;
+            return next();
+        }
+
+        flow.awaitingMessage = false;
+        flow.message = text;
+        ctx.session.announceFlow = flow;
+        await showAnnounceMenu(ctx);
     });
 
     // Build node selection keyboard from bitmask
@@ -856,7 +915,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         await ctx.editMessageText(
             `📢 *Select Nodes 选择节点*\n\n` +
-            `Message 消息:\n${escapeMarkdown(flow.message)}\n\n` +
+            `Message 消息:\n${escapeMarkdown(flow.message || '')}\n\n` +
             `Tap nodes to toggle selection:\n` +
             `点击节点切换选中状态：`,
             { parse_mode: 'Markdown', reply_markup: keyboard }
@@ -877,46 +936,80 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         await ctx.editMessageText(
             `📢 *Select Nodes 选择节点*\n\n` +
-            `Message 消息:\n${escapeMarkdown(flow.message)}\n\n` +
+            `Message 消息:\n${escapeMarkdown(flow.message || '')}\n\n` +
             `Tap nodes to toggle selection:\n` +
             `点击节点切换选中状态：`,
             { parse_mode: 'Markdown', reply_markup: keyboard }
         );
     });
 
-    // Handle "Done" → preview targets, then confirm
+    // Handle "Done" → store selection, go to preview or back to menu
     bot.callbackQuery(/^ann:done:(.+)$/, async (ctx) => {
         if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
-        await ctx.answerCallbackQuery('Loading preview...');
 
         const bitmask = ctx.match[1]!;
         const flow = ctx.session.announceFlow;
-        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.\n会话已过期，请重新执行 /announce'); return; }
 
         const selectedCount = (bitmask.match(/1/g) || []).length;
         if (selectedCount === 0) {
-            await ctx.answerCallbackQuery('⚠️ Select at least 1 node');
+            await ctx.answerCallbackQuery('⚠️ Select at least 1 node 至少选择 1 个节点');
             return;
         }
 
+        await ctx.answerCallbackQuery(`${selectedCount} node(s) selected`);
+
         // Resolve selected router UUIDs and store in session
         const selectedRouters = flow.routerUuids.filter((_: string, i: number) => bitmask[i] === '1');
-        const selectedNames = flow.routerNames.filter((_: string, i: number) => bitmask[i] === '1');
         ctx.session.announceFlow = { ...flow, selectedRouters };
 
-        await sendAnnouncePreview(ctx, flow.message, selectedRouters, selectedNames);
+        // If message is filled → go to preview; otherwise → back to menu
+        if (flow.message) {
+            const selectedNames = flow.routerNames.filter((_: string, i: number) => bitmask[i] === '1');
+            await sendAnnouncePreview(ctx, flow.message, selectedRouters, selectedNames);
+        } else {
+            await showAnnounceMenu(ctx, true);
+        }
     });
 
-    // Handle "All users"
+    // Handle "All users" → store selection, go to preview or back to menu
     bot.callbackQuery('ann:all', async (ctx) => {
         if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
-        await ctx.answerCallbackQuery('Loading preview...');
+        await ctx.answerCallbackQuery();
 
         const flow = ctx.session.announceFlow;
-        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.'); return; }
+        if (!flow) { await ctx.editMessageText('❌ Session expired. Run /announce again.\n会话已过期，请重新执行 /announce'); return; }
 
         ctx.session.announceFlow = { ...flow, selectedRouters: [] };
-        await sendAnnouncePreview(ctx, flow.message, [], []);
+
+        // If message is filled → go to preview; otherwise → back to menu
+        if (flow.message) {
+            await sendAnnouncePreview(ctx, flow.message, [], []);
+        } else {
+            await showAnnounceMenu(ctx, true);
+        }
+    });
+
+    // Handle "Preview & Send" from main menu
+    bot.callbackQuery('ann:preview', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery('Loading preview... 加载预览...');
+
+        const flow = ctx.session.announceFlow;
+        if (!flow?.message || flow.selectedRouters === undefined) {
+            await ctx.editMessageText('❌ Missing content or scope.\n缺少内容或范围。');
+            return;
+        }
+
+        const routers = flow.selectedRouters;
+        const routerNames = routers.length > 0
+            ? routers.map(uuid => {
+                const idx = flow.routerUuids.indexOf(uuid);
+                return idx !== -1 ? flow.routerNames[idx]! : uuid;
+            })
+            : [];
+
+        await sendAnnouncePreview(ctx, flow.message, routers, routerNames);
     });
 
     // Shared: fetch targets → show confirm
@@ -1023,7 +1116,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             }
         }
 
-        const sendResult = await executeSend(ctx, flow.message, tgTargets, emailTargets);
+        const sendResult = await executeSend(ctx, flow.message || '', tgTargets, emailTargets);
         await showSendReport(ctx, sendResult, flow);
     });
 
@@ -1045,7 +1138,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
         await ctx.editMessageText('🔄 Retrying failed items...\n正在重试失败项...');
 
-        const sendResult = await executeSend(ctx, flow.message, retryTg, retryEmail);
+        const sendResult = await executeSend(ctx, flow.message || '', retryTg, retryEmail);
         await showSendReport(ctx, sendResult, flow, true);
     });
 
@@ -1186,61 +1279,233 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
     });
 
     /**
-     * /notify <ASN,...> <message> - Send notification to specific ASN users
+     * /notify - Send notification to specific ASN users (inline keyboard flow)
      */
     bot.command('notify', async (ctx) => {
         if (!isAdmin(ctx)) {
-            await ctx.reply('❌ Admin access required.');
+            await ctx.reply('❌ Admin access required.\n需要管理员权限。');
             return;
         }
 
         const args = ctx.match?.trim() || '';
-        if (!args) {
-            await ctx.reply(
-                `🔔 *Notify 通知*\n\n` +
-                `Usage 用法:\n` +
-                `• \`/notify <ASN> <message>\` — single user\n` +
-                `• \`/notify <ASN1,ASN2,...> <message>\` — multiple users\n\n` +
-                `Example 示例:\n` +
-                `\`/notify 0998 Your tunnel is down\`\n` +
-                `\`/notify 0998,1234 Maintenance tonight\``,
-                { parse_mode: 'Markdown' }
-            );
+
+        // Shortcut: /notify <ASN,...> <message> → direct send (keep backward compat)
+        if (args) {
+            const spaceIdx = args.indexOf(' ');
+            if (spaceIdx !== -1) {
+                const asnPart = args.slice(0, spaceIdx);
+                const message = args.slice(spaceIdx + 1).trim();
+                const asns = asnPart.split(',').map(s => normalizeAsn(s.trim())).filter(n => !isNaN(n));
+
+                if (asns.length > 0 && message) {
+                    await executeDirectNotify(ctx, asns, message);
+                    return;
+                }
+            }
+
+            // Single arg might be ASN → pre-fill targets
+            const asns = args.split(',').map(s => normalizeAsn(s.trim())).filter(n => !isNaN(n));
+            if (asns.length > 0) {
+                ctx.session.notifyFlow = { asns };
+                await showNotifyMenu(ctx);
+                return;
+            }
+        }
+
+        // No args → show main menu
+        ctx.session.notifyFlow = {};
+        await showNotifyMenu(ctx);
+    });
+
+    /** Build and display the notify main menu */
+    async function showNotifyMenu(ctx: BotContext, editMessage = false) {
+        const flow = ctx.session.notifyFlow;
+        if (!flow) return;
+
+        const msgStatus = flow.message
+            ? `✅ ${flow.message.length > 30 ? flow.message.slice(0, 30) + '...' : flow.message}`
+            : '❌ Not set 未填写';
+        const asnStatus = flow.asns && flow.asns.length > 0
+            ? `✅ ${flow.asns.map(a => `AS${a}`).join(', ')}`
+            : '❌ Not set 未选择';
+
+        const text =
+            `🔔 *Notify 通知*\n${DIVIDER}\n` +
+            `Content 内容: ${escapeMarkdown(msgStatus)}\n` +
+            `Targets 目标: ${escapeMarkdown(asnStatus)}`;
+
+        const keyboard = new InlineKeyboard()
+            .text(`📝 ${flow.message ? 'Edit' : 'Set'} Content ${flow.message ? '修改' : '填写'}内容`, 'ntf:msg')
+            .row()
+            .text(`👥 ${flow.asns?.length ? 'Edit' : 'Select'} ASN ${flow.asns?.length ? '修改' : '选择'}目标`, 'ntf:asn')
+            .row();
+
+        // Only show preview if both fields are filled
+        if (flow.message && flow.asns && flow.asns.length > 0) {
+            keyboard.text('✅ Preview & Send 预览发送', 'ntf:preview').row();
+        }
+
+        keyboard.text('🚫 Cancel 取消', 'ntf:cancel');
+
+        if (editMessage) {
+            await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+        } else {
+            await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+        }
+    }
+
+    // ntf:msg → ask for message text
+    bot.callbackQuery('ntf:msg', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery();
+
+        if (!ctx.session.notifyFlow) ctx.session.notifyFlow = {};
+        ctx.session.notifyFlow.awaitingMessage = true;
+
+        await ctx.editMessageText(
+            `🔔 *Notify — Content 内容*\n${DIVIDER}\n` +
+            `Enter notification message below.\n` +
+            `请输入通知内容。\n\n` +
+            `/cancel to go back\n/cancel 返回`,
+            { parse_mode: 'Markdown' }
+        );
+    });
+
+    // ntf:asn → ask for ASN input
+    bot.callbackQuery('ntf:asn', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery();
+
+        if (!ctx.session.notifyFlow) ctx.session.notifyFlow = {};
+        ctx.session.notifyFlow.awaitingAsns = true;
+
+        await ctx.editMessageText(
+            `🔔 *Notify — Targets 目标*\n${DIVIDER}\n` +
+            `Enter ASN(s), comma separated.\n` +
+            `请输入 ASN，逗号分隔。\n\n` +
+            `Example 示例: \`998\`, \`0998,1234\`\n\n` +
+            `/cancel to go back\n/cancel 返回`,
+            { parse_mode: 'Markdown' }
+        );
+    });
+
+    // Handle text input for notify flow
+    bot.on('message:text', async (ctx, next) => {
+        const flow = ctx.session.notifyFlow;
+        if (!flow) return next();
+
+        const text = ctx.message.text.trim();
+
+        // Handle cancel
+        if (text === '/cancel') {
+            flow.awaitingMessage = false;
+            flow.awaitingAsns = false;
+            await showNotifyMenu(ctx);
             return;
         }
 
-        // Parse: first token = ASN(s), rest = message
-        const spaceIdx = args.indexOf(' ');
-        if (spaceIdx === -1) {
-            await ctx.reply('❌ Missing message. Usage: `/notify <ASN> <message>`', { parse_mode: 'Markdown' });
+        // If another command, cancel flow and pass through
+        if (text.startsWith('/')) {
+            ctx.session.notifyFlow = undefined;
+            return next();
+        }
+
+        // Awaiting message content
+        if (flow.awaitingMessage) {
+            flow.awaitingMessage = false;
+            flow.message = text;
+            ctx.session.notifyFlow = flow;
+            await showNotifyMenu(ctx);
             return;
         }
 
-        const asnPart = args.slice(0, spaceIdx);
-        const message = args.slice(spaceIdx + 1).trim();
-
-        if (!message) {
-            await ctx.reply('❌ Message cannot be empty.\n消息不能为空。');
+        // Awaiting ASN input
+        if (flow.awaitingAsns) {
+            const asns = text.split(',').map(s => normalizeAsn(s.trim())).filter(n => !isNaN(n));
+            if (asns.length === 0) {
+                await ctx.reply(
+                    `❌ Invalid ASN format. Example: 998, 0998, AS4242420998\n` +
+                    `无效的 ASN 格式。`
+                );
+                return;
+            }
+            flow.awaitingAsns = false;
+            flow.asns = asns;
+            ctx.session.notifyFlow = flow;
+            await showNotifyMenu(ctx);
             return;
         }
 
-        // Parse ASN list (comma-separated, supports short form like 0998)
-        const asns = asnPart.split(',').map(s => normalizeAsn(s.trim())).filter(n => !isNaN(n));
+        return next();
+    });
 
-        if (asns.length === 0) {
-            await ctx.reply('❌ Invalid ASN format.\n无效的 ASN 格式。');
+    // ntf:preview → show confirmation
+    bot.callbackQuery('ntf:preview', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery();
+
+        const flow = ctx.session.notifyFlow;
+        if (!flow?.message || !flow?.asns?.length) {
+            await ctx.editMessageText('❌ Missing content or targets.\n缺少内容或目标。');
             return;
         }
 
+        const asnList = flow.asns.map(a => `AS${a}`).join(', ');
+
+        const keyboard = new InlineKeyboard()
+            .text('✅ Send 发送', 'ntf:send')
+            .text('🚫 Cancel 取消', 'ntf:cancel');
+
+        await ctx.editMessageText(
+            `🔔 *Notify Preview 通知预览*\n${DIVIDER}\n\n` +
+            `*Targets 目标:* ${escapeMarkdown(asnList)}\n\n` +
+            `*Content 内容:*\n${escapeMarkdown(flow.message)}\n\n` +
+            `Confirm send?\n确认发送？`,
+            { parse_mode: 'Markdown', reply_markup: keyboard }
+        );
+    });
+
+    // ntf:send → execute send
+    bot.callbackQuery('ntf:send', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery('Sending... 发送中...');
+
+        const flow = ctx.session.notifyFlow;
+        if (!flow?.message || !flow?.asns?.length) {
+            await ctx.editMessageText('❌ Session expired.\n会话已过期。');
+            return;
+        }
+
+        await ctx.editMessageText('⏳ Sending notifications...\n正在发送通知...');
+
+        await executeDirectNotify(ctx, flow.asns, flow.message);
+        ctx.session.notifyFlow = undefined;
+    });
+
+    // ntf:cancel → abort
+    bot.callbackQuery('ntf:cancel', async (ctx) => {
+        ctx.session.notifyFlow = undefined;
+        await ctx.answerCallbackQuery();
+        await ctx.editMessageText('❌ Cancelled.\n已取消。');
+    });
+
+    /**
+     * Execute direct notification to specific ASNs.
+     *
+     * Args:
+     *   ctx: Bot context.
+     *   asns: Target ASN list.
+     *   message: Notification message text.
+     */
+    async function executeDirectNotify(ctx: BotContext, asns: number[], message: string) {
         try {
-            // Get notification targets for specific ASNs
             const result = await apiRequest('/admin', 'POST', {
                 action: 'getNotificationTargets',
                 asns,
             }, config.apiToken);
 
             if (result.code !== 0) {
-                await ctx.reply(`❌ Failed to get targets: ${result.message}`);
+                await ctx.reply(`❌ Failed to get targets: ${result.message}\n获取目标失败。`);
                 return;
             }
 
@@ -1277,7 +1542,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 }
             }
 
-            // Check for ASNs that had no targets (use Number() to avoid type mismatch)
+            // Check for ASNs that had no targets
             const targetedAsns = new Set(targets.map(t => Number(t.asn)));
             for (const asn of asns) {
                 if (!targetedAsns.has(Number(asn))) {
@@ -1293,9 +1558,9 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             );
         } catch (error) {
             console.error('[Notify] Error:', error);
-            await ctx.reply('❌ Notification failed.');
+            await ctx.reply('❌ Notification failed.\n通知发送失败。');
         }
-    });
+    }
 }
 
 /**

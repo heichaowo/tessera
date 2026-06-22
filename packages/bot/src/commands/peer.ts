@@ -5,6 +5,7 @@ import config from '../config';
 import { apiRequest } from '../api';
 import { isChinaIP, resolveEndpoint, CN_REJECTION_MESSAGE } from '../providers/chinaIp';
 import { validateIpOwnership, isLinkLocal, isDN42ULA, isDN42IPv4 } from '../services/dn42Validator';
+import { DIVIDER } from '../templates';
 
 // Import from new peer module
 import {
@@ -1897,34 +1898,96 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
      * /info - Show peer info with live WG/BGP status
      */
     bot.command('info', async (ctx) => {
-        // Check if admin specifying ASN
         const args = ctx.match?.trim().split(/\s+/) || [];
-        let targetAsn = ctx.session.asn;
-        let isAdminMode = false;
 
         const username = ctx.from?.username?.toLowerCase();
         const adminUsername = config.adminUsername?.toLowerCase().replace('@', '');
         const isAdmin = username === adminUsername || ctx.session.isAdmin === true;
 
+        // Admin with ASN arg → direct lookup
         if (args[0] && isAsnInput(args[0])) {
             if (!isAdmin) {
                 await ctx.reply('❌ Only admin can view other ASN info\n只有管理员可以查看其他 ASN 的信息');
                 return;
             }
-            targetAsn = normalizeAsn(args[0]);
-            isAdminMode = true;
+            const targetAsn = normalizeAsn(args[0]);
+            await fetchAndDisplayInfo(ctx, targetAsn, true);
+            return;
         }
 
+        // Admin without args → prompt for ASN
+        if (isAdmin && !args[0]) {
+            ctx.session.awaitingInfoAsn = true;
+            const keyboard = new InlineKeyboard()
+                .text('🚫 Cancel 取消', 'info:cancel');
+
+            await ctx.reply(
+                `📊 *Peer Info 查询*\n${DIVIDER}\n` +
+                `Enter ASN to view peer details\n` +
+                `请输入要查看的 ASN\n\n` +
+                `Example 示例: \`998\`, \`0998\`, \`AS4242420998\``,
+                { parse_mode: 'Markdown', reply_markup: keyboard }
+            );
+            return;
+        }
+
+        // Normal user → show own info
+        const targetAsn = ctx.session.asn;
         if (!targetAsn) {
             await ctx.reply('❌ Please /login first.\n请先登录');
             return;
         }
 
+        await fetchAndDisplayInfo(ctx, targetAsn, false);
+    });
+
+    // Handle admin ASN text input for /info
+    bot.on('message:text', async (ctx, next) => {
+        if (!ctx.session.awaitingInfoAsn) {
+            return next();
+        }
+
+        const text = ctx.message.text.trim();
+
+        // If user sends another command, cancel and pass through
+        if (text.startsWith('/')) {
+            ctx.session.awaitingInfoAsn = false;
+            return next();
+        }
+
+        if (!isAsnInput(text)) {
+            await ctx.reply(
+                `❌ Invalid ASN format. Example: 998, 0998, AS4242420998\n` +
+                `无效的 ASN 格式。`
+            );
+            return;
+        }
+
+        ctx.session.awaitingInfoAsn = false;
+        const targetAsn = normalizeAsn(text);
+        await fetchAndDisplayInfo(ctx, targetAsn, true);
+    });
+
+    // Cancel info ASN input
+    bot.callbackQuery('info:cancel', async (ctx) => {
+        ctx.session.awaitingInfoAsn = false;
+        await ctx.answerCallbackQuery();
+        await ctx.editMessageText('❌ Cancelled.\n已取消。');
+    });
+
+    /**
+     * Shared: fetch and display peer info for an ASN.
+     *
+     * Args:
+     *   ctx: Bot context.
+     *   targetAsn: The ASN to query.
+     *   useAdminApi: Whether to use admin API with token.
+     */
+    async function fetchAndDisplayInfo(ctx: BotContext, targetAsn: number, useAdminApi: boolean) {
         await ctx.reply('⏳ Fetching peer info...\n正在获取 Peer 信息...');
 
         try {
-            // Admin mode: use admin API; User mode: use session API
-            const result = isAdminMode
+            const result = useAdminApi
                 ? await apiRequest('/admin', 'POST', { action: 'enumSessions', asn: targetAsn }, config.apiToken)
                 : await apiRequest('/session', 'POST', { action: 'list', asn: targetAsn });
 
@@ -1939,7 +2002,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 await ctx.reply(
                     `📊 *Peer Info for AS${targetAsn}*\n\n` +
                     `No peers found.\n没有 Peer\n\n` +
-                    `Use /peer to create one.`,
+                    `Use /peer to create one.\n使用 /peer 创建。`,
                     { parse_mode: 'Markdown' }
                 );
                 return;
@@ -2005,7 +2068,7 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
                 message += `*${i + 1}. ${displayName}* ${statusIcon} ${statusText}\n`;
 
                 if (s.ipv6) message += `   IPv6: \`${s.ipv6}\`\n`;
-                if (s.endpoint) message += `   Your Endpoint: \`${s.endpoint}\`\n`;
+                if (s.endpoint) message += `   ${useAdminApi ? 'Peer' : 'Your'} Endpoint: \`${s.endpoint}\`\n`;
                 if (s.serverEndpoint) message += `   🖥️ Server Endpoint: \`${s.serverEndpoint}\`\n`;
                 if (s.serverWgKey) message += `   🔑 Server Key: \`${s.serverWgKey.slice(0, 10)}...\`\n`;
 
@@ -2040,24 +2103,30 @@ export function registerPeerCommands(bot: Bot<BotContext>) {
             }
 
             const keyboard = new InlineKeyboard()
-                .text('🔄 Refresh 刷新', 'info:refresh')
+                .text('🔄 Refresh 刷新', `info:refresh:${targetAsn}`)
                 .text('🔧 Modify 修改', 'info:modify');
 
             await ctx.reply(message, { parse_mode: 'Markdown', reply_markup: keyboard });
         } catch (error) {
             console.error('[Info] Error:', error);
-            await ctx.reply('❌ Failed to fetch peer info.');
+            await ctx.reply('❌ Failed to fetch peer info.\n获取 Peer 信息失败。');
         }
-    });
+    }
 
-    // Handle info:refresh and info:modify callbacks
-    bot.callbackQuery('info:refresh', async (ctx) => {
-        await ctx.answerCallbackQuery('Use /info to refresh');
-        await ctx.reply('🔄 Use /info to refresh peer status\n使用 /info 刷新状态');
+    // Handle info:refresh — re-fetch with the same ASN
+    bot.callbackQuery(/^info:refresh:(\d+)$/, async (ctx) => {
+        await ctx.answerCallbackQuery('Refreshing... 刷新中...');
+        const targetAsn = parseInt(ctx.match[1]!, 10);
+
+        const username = ctx.from?.username?.toLowerCase();
+        const adminUsername = config.adminUsername?.toLowerCase().replace('@', '');
+        const useAdminApi = username === adminUsername || ctx.session.isAdmin === true;
+
+        await fetchAndDisplayInfo(ctx, targetAsn, useAdminApi);
     });
 
     bot.callbackQuery('info:modify', async (ctx) => {
-        await ctx.answerCallbackQuery('Use /modify command');
+        await ctx.answerCallbackQuery();
         await ctx.reply('Use /modify to modify a peer\n使用 /modify 修改 Peer');
     });
 

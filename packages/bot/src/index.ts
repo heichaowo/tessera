@@ -78,7 +78,7 @@ interface SessionData {
     };
     /** Announce flow: message + router UUID order for bitmask */
     announceFlow?: {
-        message: string;
+        message?: string;
         routerUuids: string[];
         routerNames: string[];
         /** Router UUIDs selected for targeted announce. Empty = all. */
@@ -87,7 +87,20 @@ interface SessionData {
         failedTg?: Array<{ asn: number; telegramId: number }>;
         /** Failed email targets for retry */
         failedEmail?: Array<{ asn: number; email: string }>;
+        /** Awaiting message text input */
+        awaitingMessage?: boolean;
     };
+    /** Notify flow: message + ASN targets for inline keyboard interaction */
+    notifyFlow?: {
+        message?: string;
+        asns?: number[];
+        /** Awaiting message text input */
+        awaitingMessage?: boolean;
+        /** Awaiting ASN text input */
+        awaitingAsns?: boolean;
+    };
+    /** Admin /info: awaiting ASN input */
+    awaitingInfoAsn?: boolean;
     /** Set to true after telegramId has been registered to DB for this session */
     _registered?: boolean;
 }
