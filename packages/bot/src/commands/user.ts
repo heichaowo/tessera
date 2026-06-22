@@ -493,8 +493,17 @@ export function registerUserCommands(bot: Bot<BotContext>) {
     // login:cancel → abort login flow
     bot.callbackQuery('login:cancel', async (ctx) => {
         const userId = ctx.from?.id;
-        if (userId) challengeStore.delete(userId);
-        ctx.session.awaitingAsn = false;
+
+        // If still awaiting ASN input, full cancel
+        if (ctx.session.awaitingAsn) {
+            if (userId) challengeStore.delete(userId);
+            ctx.session.awaitingAsn = false;
+            await ctx.answerCallbackQuery();
+            await ctx.editMessageText(`${ICONS.cancel} Login cancelled.\n登录已取消。`);
+            return;
+        }
+
+        // Already past ASN stage — just dismiss stale button, don't disrupt active flow
         await ctx.answerCallbackQuery();
         await ctx.editMessageText(`${ICONS.cancel} Login cancelled.\n登录已取消。`);
     });

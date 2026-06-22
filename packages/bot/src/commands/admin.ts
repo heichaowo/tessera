@@ -280,7 +280,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             message += `❌ Failed 失败: *${failed}*\n\n`;
             message += `*Failures:*\n`;
             for (const r of results.filter(r => r.status === 'error')) {
-                message += `• AS${r.asn}: ${r.error}\n`;
+                message += `• AS${r.asn}: ${escapeMarkdown(r.error || 'unknown')}\n`;
             }
         }
 
@@ -308,6 +308,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 
     // Handle cancel
     bot.callbackQuery('migrate:cancel', async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
         await ctx.answerCallbackQuery('Cancelled');
         await ctx.editMessageText('🚫 Migration cancelled.\n迁移已取消。');
     });
@@ -421,7 +422,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 const shortId = s.uuid.slice(0, 8);
                 const endpoint = s.ipv4EndpointAddress || s.ipv6EndpointAddress || 'N/A';
 
-                message += `*AS${s.asn}* → ${s.routerName || s.router}\n`;
+                message += `*AS${s.asn}* → ${escapeMarkdown(s.routerName || s.router)}\n`;
                 message += `   ${statusLabel} | \`${shortId}…\`\n`;
                 message += `   Endpoint: \`${endpoint}\`\n\n`;
             }
@@ -436,6 +437,170 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             await ctx.reply('❌ Failed to fetch sessions.');
         }
     });
+
+    /**
+     * /setstatus <ASN> <status> - Change session status
+     * Example: /setstatus 998 enabled
+     */
+    bot.command('setstatus', async (ctx) => {
+        if (!isAdmin(ctx)) {
+            await ctx.reply('❌ Admin access required.');
+            return;
+        }
+
+        const args = ctx.match?.trim().split(/\s+/) || [];
+
+        const validStatuses: Record<string, number> = {
+            disabled: 1, enabled: 2, active: 2,
+            pending: 3, queued: 4,
+            delete: 5, problem: 6,
+            teardown: 7, rejected: 8,
+        };
+        const statusLabels: Record<number, string> = {
+            1: '⚫ Disabled', 2: '🟢 Enabled',
+            3: '🟡 Pending', 4: '🔵 Queued',
+            5: '🗑️ Deleting', 6: '🔴 Problem',
+            7: '⏳ Teardown', 8: '❌ Rejected',
+        };
+
+        if (args.length < 2 || args[0] === '') {
+            await ctx.reply(
+                `🔧 *Set Session Status*\n\n` +
+                `Usage: \`/setstatus <ASN> <status>\`\n\n` +
+                `Example:\n` +
+                `\`/setstatus 998 enabled\`\n` +
+                `\`/setstatus 1234 disabled\`\n\n` +
+                `Valid statuses: disabled, enabled, pending, queued, problem, rejected`,
+                { parse_mode: 'Markdown' }
+            );
+            return;
+        }
+
+        const asn = normalizeAsn(args[0]!);
+        const statusArg = args[1]!.toLowerCase();
+        const newStatus = validStatuses[statusArg] ?? (Number(statusArg) || undefined);
+
+        if (isNaN(asn)) {
+            await ctx.reply('❌ Invalid ASN format.\n无效的 ASN 格式。');
+            return;
+        }
+
+        if (!newStatus || !statusLabels[newStatus]) {
+            await ctx.reply(`❌ Invalid status: \`${escapeMarkdown(statusArg)}\``, { parse_mode: 'Markdown' });
+            return;
+        }
+
+        try {
+            const result = await apiRequest('/admin', 'POST', {
+                action: 'enumSessions',
+            }, config.apiToken);
+
+            const sessions = (result.data?.sessions || []) as SessionInfo[];
+            const matches = sessions.filter(s => s.asn === asn);
+
+            if (matches.length === 0) {
+                await ctx.reply(`❌ No sessions found for AS${asn}`);
+                return;
+            }
+
+            // Multiple sessions → show picker
+            if (matches.length > 1) {
+                const keyboard = new InlineKeyboard();
+                for (const s of matches) {
+                    const node = s.routerName || s.router;
+                    const cur = statusLabels[s.status ?? 0] || '?';
+                    keyboard.text(
+                        `${node} (${cur})`,
+                        `ss:${s.uuid}:${newStatus}`
+                    ).row();
+                }
+                keyboard.text('🚫 Cancel 取消', 'ss:cancel');
+
+                await ctx.reply(
+                    `🔧 AS${asn} has ${matches.length} sessions.\n` +
+                    `Select which one to set to ${statusLabels[newStatus]}:\n` +
+                    `AS${asn} 有 ${matches.length} 个会话，选择要修改的：`,
+                    { reply_markup: keyboard }
+                );
+                return;
+            }
+
+            // Single session → apply directly
+            const session = matches[0]!;
+            await applyStatusChange(ctx, session, newStatus, statusLabels);
+        } catch (error) {
+            console.error('[SetStatus] Error:', error);
+            await ctx.reply('❌ Failed to update status.');
+        }
+    });
+
+    // Handle setstatus picker callback
+    bot.callbackQuery(/^ss:cancel$/, async (ctx) => {
+        await ctx.answerCallbackQuery();
+        await ctx.editMessageText('🚫 Cancelled.\n已取消。');
+    });
+
+    bot.callbackQuery(/^ss:([^:]+):(\d+)$/, async (ctx) => {
+        if (!isAdmin(ctx)) { await ctx.answerCallbackQuery('❌ Admin only'); return; }
+        await ctx.answerCallbackQuery();
+
+        const uuid = ctx.match[1]!;
+        const newStatus = Number(ctx.match[2]);
+        const statusLabels: Record<number, string> = {
+            1: '⚫ Disabled', 2: '🟢 Enabled',
+            3: '🟡 Pending', 4: '🔵 Queued',
+            5: '🗑️ Deleting', 6: '🔴 Problem',
+            7: '⏳ Teardown', 8: '❌ Rejected',
+        };
+
+        // Fetch session info
+        const result = await apiRequest('/admin', 'POST', { action: 'enumSessions' }, config.apiToken);
+        const session = ((result.data?.sessions || []) as SessionInfo[]).find(s => s.uuid === uuid);
+
+        if (!session) {
+            await ctx.editMessageText('❌ Session not found.');
+            return;
+        }
+
+        await applyStatusChange(ctx, session, newStatus, statusLabels, true);
+    });
+
+    /** Apply status change and show result */
+    async function applyStatusChange(
+        ctx: BotContext,
+        session: SessionInfo,
+        newStatus: number,
+        statusLabels: Record<number, string>,
+        editMessage = false,
+    ) {
+        const currentLabel = statusLabels[session.status ?? 0] || `Status ${session.status}`;
+        const newLabel = statusLabels[newStatus]!;
+        const node = session.routerName || session.router;
+
+        const updateResult = await apiRequest('/admin', 'POST', {
+            action: 'updateSession',
+            uuid: session.uuid,
+            status: newStatus,
+        }, config.apiToken);
+
+        if (updateResult.code !== 0) {
+            const msg = `❌ Failed: ${updateResult.message}`;
+            editMessage ? await ctx.editMessageText(msg) : await ctx.reply(msg);
+            return;
+        }
+
+        const report =
+            `✅ *Status Updated*\n\n` +
+            `ASN: \`AS${session.asn}\`\n` +
+            `Node: ${escapeMarkdown(node)}\n` +
+            `${currentLabel} → ${newLabel}`;
+
+        if (editMessage) {
+            await ctx.editMessageText(report, { parse_mode: 'Markdown' });
+        } else {
+            await ctx.reply(report, { parse_mode: 'Markdown' });
+        }
+    }
 
     /**
      * /nodes - List all nodes
@@ -578,7 +743,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
                 port: parseInt(port || '51820', 10),
                 publicKey: pubkey,
                 ipv6,
-                status: 1, // ACTIVE
+                status: 2, // ENABLED (bypass approval)
             }, config.apiToken);
 
             if (result.code !== 0) {
@@ -1133,22 +1298,27 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         const unreachableAsns = allAsns.filter(a => !coveredAsns.has(a));
 
         if (unreachableAsns.length > 0) {
-            for (const asn of unreachableAsns) {
-                try {
-                    const contacts = await fetchContacts(asn);
-                    // Find first email-like contact
+            // Parallel fetch with 5s timeout per ASN
+            const contactResults = await Promise.allSettled(
+                unreachableAsns.map(async (asn) => {
+                    const timeout = new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error('timeout')), 5000)
+                    );
+                    const contacts = await Promise.race([fetchContacts(asn), timeout]);
                     const email = contacts.find(c => c.includes('@') && !c.startsWith('@'));
-                    if (email) {
-                        emailTargets.push({ asn, email });
-                        // Backfill contact into the session for future use
-                        apiRequest('/admin', 'POST', {
-                            action: 'updateSessionContact',
-                            asn,
-                            contact: email,
-                        }, config.apiToken).catch(() => {});
-                    }
-                } catch {
-                    // Burble API unavailable, skip this ASN
+                    return email ? { asn, email } : null;
+                })
+            );
+
+            for (const result of contactResults) {
+                if (result.status === 'fulfilled' && result.value) {
+                    emailTargets.push(result.value);
+                    // Backfill contact (non-blocking)
+                    apiRequest('/admin', 'POST', {
+                        action: 'updateSessionContact',
+                        asn: result.value.asn,
+                        contact: result.value.email,
+                    }, config.apiToken).catch(() => {});
                 }
             }
         }
@@ -1191,6 +1361,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
         const adminTgId = ctx.from?.id;
         let tgSent = 0;
         const failedTg: NotificationTarget[] = [];
+        const totalTg = tgTargets.filter(t => t.telegramId !== adminTgId).length;
 
         for (const target of tgTargets) {
             if (target.telegramId === adminTgId) continue;
@@ -1204,6 +1375,13 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             } catch (error) {
                 console.error(`[Announce] TG failed AS${target.asn}:`, error);
                 failedTg.push(target);
+            }
+
+            // Progress update every 10 messages
+            if ((tgSent + failedTg.length) % 10 === 0 && (tgSent + failedTg.length) < totalTg) {
+                ctx.editMessageText(
+                    `⏳ Sending... 📱 TG ${tgSent + failedTg.length}/${totalTg}\n正在发送...`
+                ).catch(() => {}); // Non-blocking, ignore edit errors
             }
         }
 

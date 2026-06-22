@@ -562,13 +562,23 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
     const allowedFields = [
         'ipv4', 'ipv6', 'ipv6LinkLocal', 'localIpv4',
         'endpoint', 'credential', 'mtu', 'extensions',
-        'contact', 'data'
+        'contact', 'data', 'status'
     ];
 
     // Build update object with only allowed fields
     const updateData: Record<string, unknown> = {};
     for (const field of allowedFields) {
         if (field in updates) {
+            // Validate status against enum
+            if (field === 'status') {
+                const statusVal = Number(updates[field]);
+                if (!Object.values(PeeringStatus).includes(statusVal)) {
+                    return makeResponse(c, ResponseCode.VALIDATION_ERROR, undefined,
+                        `Invalid status value. Valid: ${Object.entries(PeeringStatus).filter(([k]) => isNaN(Number(k))).map(([k, v]) => `${v}=${k}`).join(', ')}`);
+                }
+                updateData[field] = statusVal;
+                continue;
+            }
             // Convert extensions from comma-separated string to JSON array for JSONB column
             if (field === 'extensions' && typeof updates[field] === 'string') {
                 const extStr = updates[field] as string;
@@ -603,9 +613,9 @@ async function updateSessionAdmin(c: Context, body: { uuid?: string;[key: string
     }
 
     // Auto-redeploy: any field change on an ENABLED session triggers re-setup
-    // Merged into a single update to avoid race condition
+    // Skip if status is being explicitly set (admin override)
     const currentStatus = session.get('status') as number;
-    if (currentStatus === PeeringStatus.ENABLED) {
+    if (currentStatus === PeeringStatus.ENABLED && !('status' in updateData)) {
         updateData.status = PeeringStatus.QUEUED_FOR_SETUP;
     }
 
