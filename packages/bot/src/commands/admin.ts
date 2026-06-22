@@ -496,7 +496,7 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
             }, config.apiToken);
 
             const sessions = (result.data?.sessions || []) as SessionInfo[];
-            const matches = sessions.filter(s => s.asn === asn);
+            const matches = sessions.filter(s => Number(s.asn) === asn);
 
             if (matches.length === 0) {
                 await ctx.reply(`❌ No sessions found for AS${asn}`);
