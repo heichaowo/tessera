@@ -38,7 +38,7 @@ export function parseExtensions(extensions: string | null): string[] {
  * Calculate WireGuard interface name from ASN
  */
 export function getInterfaceName(asn: number): string {
-    return `dn42-${asn}`;
+    return `dn42_${asn}`;
 }
 
 /**
