@@ -4,6 +4,7 @@ import { apiRequest } from "../api";
 import config from "../config";
 import { isAdmin } from "../guards";
 import type { BotContext } from "../index";
+import { getNodes, getAgentEndpoint } from "../providers/nodes";
 import { fetchContacts } from "../services/dn42Registry";
 import { DIVIDER } from "../templates";
 import { calculatePort, isAsnInput, normalizeAsn } from "./peer/validators";
@@ -559,6 +560,8 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 	});
 
 	// Callback: session action — sa:<uuid>:<action>
+	// For destructive actions (Disable=1, Delete=5), show confirmation first.
+	// For non-destructive actions (Enable=2), execute immediately.
 	bot.callbackQuery(/^sa:([^:]+):(\d+)$/, async (ctx) => {
 		if (!isAdmin(ctx)) {
 			await ctx.answerCallbackQuery("❌ Admin only");
@@ -570,8 +573,60 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 		const newStatus = Number(ctx.match[2]);
 		const newLabel = STATUS_LABELS[newStatus] || `Status ${newStatus}`;
 
+		// Destructive actions require confirmation
+		const destructiveStatuses = [1, 5, 7]; // Disabled, Delete, Teardown
+		if (destructiveStatuses.includes(newStatus)) {
+			try {
+				const result = await apiRequest(
+					"/admin",
+					"POST",
+					{ action: "enumSessions" },
+					config.apiToken,
+				);
+				const session = ((result.data?.sessions || []) as FullSessionInfo[]).find(
+					(s) => s.uuid === uuid,
+				);
+
+				if (!session) {
+					await ctx.editMessageText("❌ Session not found.\n会话未找到。");
+					return;
+				}
+
+				const currentLabel =
+					STATUS_LABELS[session.status ?? 0] || `Status ${session.status}`;
+				const node = session.routerName || session.router;
+
+				const warningIcon = newStatus === 5 ? "🗑️" : "⚠️";
+				const warningText = newStatus === 5
+					? "This will delete the session configuration.\n此操作将删除会话配置。"
+					: newStatus === 1
+						? "This will disconnect the BGP session and WG tunnel.\n此操作将断开 BGP 会话和 WG 隧道。"
+						: "This is a destructive operation.\n此操作不可逆。";
+
+				const confirmMsg =
+					`${warningIcon} *Confirm Status Change 确认状态变更*\n${DIVIDER}\n\n` +
+					`ASN: \`AS${session.asn}\`\n` +
+					`Node 节点: ${escapeMarkdown(node)}\n` +
+					`Change 变更: ${currentLabel} → ${newLabel}\n\n` +
+					`${warningText}`;
+
+				const confirmKeyboard = new InlineKeyboard();
+				confirmKeyboard.text("✅ Confirm 确认", `sac:${uuid}:${newStatus}`);
+				confirmKeyboard.text("❌ Cancel 取消", `sax`);
+
+				await ctx.editMessageText(confirmMsg, {
+					parse_mode: "Markdown",
+					reply_markup: confirmKeyboard,
+				});
+			} catch (error) {
+				console.error("[SessionAction] Confirmation error:", error);
+				await ctx.editMessageText("❌ Failed to load session.\n加载会话失败。");
+			}
+			return;
+		}
+
+		// Non-destructive actions execute immediately
 		try {
-			// Fetch current session
 			const result = await apiRequest(
 				"/admin",
 				"POST",
@@ -620,6 +675,75 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 			console.error("[SessionAction] Error:", error);
 			await ctx.editMessageText("❌ Failed to update status.\n更新状态失败。");
 		}
+	});
+
+	// Callback: session action confirmed — sac:<uuid>:<status>
+	bot.callbackQuery(/^sac:([^:]+):(\d+)$/, async (ctx) => {
+		if (!isAdmin(ctx)) {
+			await ctx.answerCallbackQuery("❌ Admin only");
+			return;
+		}
+		await ctx.answerCallbackQuery("⏳ Applying...");
+
+		const uuid = ctx.match[1]!;
+		const newStatus = Number(ctx.match[2]);
+		const newLabel = STATUS_LABELS[newStatus] || `Status ${newStatus}`;
+
+		try {
+			const result = await apiRequest(
+				"/admin",
+				"POST",
+				{ action: "enumSessions" },
+				config.apiToken,
+			);
+			const session = ((result.data?.sessions || []) as FullSessionInfo[]).find(
+				(s) => s.uuid === uuid,
+			);
+
+			if (!session) {
+				await ctx.editMessageText("❌ Session not found.\n会话未找到。");
+				return;
+			}
+
+			const currentLabel =
+				STATUS_LABELS[session.status ?? 0] || `Status ${session.status}`;
+			const node = session.routerName || session.router;
+
+			const updateResult = await apiRequest(
+				"/admin",
+				"POST",
+				{
+					action: "updateSession",
+					uuid: session.uuid,
+					status: newStatus,
+				},
+				config.apiToken,
+			);
+
+			if (updateResult.code !== 0) {
+				await ctx.editMessageText(
+					`❌ Failed: ${updateResult.message}\n操作失败: ${updateResult.message}`,
+				);
+				return;
+			}
+
+			await ctx.editMessageText(
+				`✅ *Status Updated 状态已更新*\n\n` +
+					`ASN: \`AS${session.asn}\`\n` +
+					`Node 节点: ${escapeMarkdown(node)}\n` +
+					`${currentLabel} → ${newLabel}`,
+				{ parse_mode: "Markdown" },
+			);
+		} catch (error) {
+			console.error("[SessionAction] Confirm error:", error);
+			await ctx.editMessageText("❌ Failed to update status.\n更新状态失败。");
+		}
+	});
+
+	// Callback: session action cancelled — sax
+	bot.callbackQuery(/^sax$/, async (ctx) => {
+		await ctx.answerCallbackQuery();
+		await ctx.editMessageText("🚫 Cancelled.\n已取消。");
 	});
 
 	/**
@@ -845,6 +969,74 @@ export function registerAdminCommands(bot: Bot<BotContext>) {
 		} catch (error) {
 			console.error("[Nodes] Error:", error);
 			await ctx.reply("❌ Failed to fetch nodes.\n获取节点信息失败。");
+		}
+	});
+
+	// =============================================================================
+	// /health — Real-time WG + BGP Health Diagnostics
+	// =============================================================================
+
+	/**
+	 * /health [node] — Network health diagnostics
+	 * No args: overview of all nodes
+	 * With node: detailed per-session status for that node
+	 */
+	bot.command("health", async (ctx) => {
+		if (!isAdmin(ctx)) {
+			await ctx.reply("❌ Admin access required.");
+			return;
+		}
+
+		const arg = ctx.match?.trim().toLowerCase();
+
+		try {
+			if (arg) {
+				// Detail view for a specific node
+				await renderHealthDetail(ctx, arg);
+			} else {
+				// Overview of all nodes
+				await renderHealthOverview(ctx);
+			}
+		} catch (error) {
+			console.error("[Health] Error:", error);
+			await ctx.reply("❌ Failed to fetch health data.\n获取健康状态失败。");
+		}
+	});
+
+	// Health overview callback: hov (health overview)
+	bot.callbackQuery(/^hov$/, async (ctx) => {
+		try {
+			await renderHealthOverview(ctx, ctx.callbackQuery.message?.message_id);
+			await ctx.answerCallbackQuery();
+		} catch (error) {
+			console.error("[Health] Overview callback error:", error);
+			await ctx.answerCallbackQuery("Error loading health data");
+		}
+	});
+
+	// Health detail callback: hd:<node>
+	bot.callbackQuery(/^hd:(.+)$/, async (ctx) => {
+		const node = ctx.match?.[1];
+		if (!node) return;
+		try {
+			await renderHealthDetail(ctx, node, ctx.callbackQuery.message?.message_id);
+			await ctx.answerCallbackQuery();
+		} catch (error) {
+			console.error("[Health] Detail callback error:", error);
+			await ctx.answerCallbackQuery("Error loading health data");
+		}
+	});
+
+	// Health fix callback: hfix:<node>
+	bot.callbackQuery(/^hfix:(.+)$/, async (ctx) => {
+		const node = ctx.match?.[1];
+		if (!node) return;
+		try {
+			await ctx.answerCallbackQuery("🔧 Fixing...");
+			await executeHealthFix(ctx, node);
+		} catch (error) {
+			console.error("[Health] Fix callback error:", error);
+			await ctx.answerCallbackQuery("Fix failed");
 		}
 	});
 
@@ -2591,12 +2783,36 @@ async function renderSessionOverview(
 		(safePage + 1) * OVERVIEW_PAGE_SIZE,
 	);
 
+	// Fetch health data for all visible nodes in parallel (best-effort, 5s cutoff)
+	const healthMap = new Map<string, HealthData | null>();
+	const healthPromises = pageNodes.map(async (node) => {
+		const health = await fetchNodeHealth(node);
+		healthMap.set(node, health);
+	});
+	await Promise.race([
+		Promise.allSettled(healthPromises),
+		new Promise((r) => setTimeout(r, 5_000)),
+	]);
+
 	const filterLabel = filter === "all" ? "All 全部" : capitalize(filter);
 	let message = `📋 *Sessions — ${filterLabel} (${sessions.length})*\n${DIVIDER}\n\n`;
 
 	for (const node of pageNodes) {
 		const nodeSessions = groups.get(node)!;
-		message += `📡 *${escapeMarkdown(node)}* (${nodeSessions.length})\n`;
+		const health = healthMap.get(node);
+
+		// Node header with inline health indicator
+		let healthTag = "";
+		if (health) {
+			const { summary: hs } = health;
+			const parts: string[] = [];
+			if (hs.established > 0) parts.push(`${hs.established}✅`);
+			if (hs.bgp_down > 0) parts.push(`${hs.bgp_down}⚠️`);
+			if (hs.wg_down > 0) parts.push(`${hs.wg_down}❌`);
+			healthTag = parts.length > 0 ? ` | 🏥 ${parts.join(" ")}` : " | 🏥 —";
+		}
+
+		message += `📡 *${escapeMarkdown(node)}* (${nodeSessions.length}${healthTag})\n`;
 
 		// Show up to 5 sessions per node in compact form
 		const preview = nodeSessions.slice(0, 5);
@@ -2622,9 +2838,10 @@ async function renderSessionOverview(
 	// Build keyboard
 	const keyboard = new InlineKeyboard();
 
-	// Node detail buttons
+	// Node detail buttons + health buttons
 	for (const node of pageNodes) {
 		keyboard.text(`▶ ${node}`, `sd:${filter}:${node}:0`);
+		keyboard.text(`🏥`, `hd:${node}`);
 	}
 	keyboard.row();
 
@@ -2782,4 +2999,333 @@ async function renderSessionDetail(
 			reply_markup: keyboard,
 		});
 	}
+}
+
+// =============================================================================
+// Health Command Helpers
+// =============================================================================
+
+/** Health API response types */
+interface HealthSessionInfo {
+	asn: number;
+	interface: string;
+	wg: {
+		exists: boolean;
+		up: boolean;
+		last_handshake: string;
+		handshake_ok: boolean;
+		has_link_local: boolean;
+		transfer?: { rx: string; tx: string };
+	};
+	bgp: {
+		state: string;
+		uptime?: string;
+		routes_imported: number;
+		routes_exported: number;
+	};
+}
+
+interface HealthSummary {
+	total: number;
+	established: number;
+	bgp_down: number;
+	wg_down: number;
+}
+
+interface HealthData {
+	node: string;
+	timestamp: number;
+	sessions: HealthSessionInfo[];
+	summary: HealthSummary;
+}
+
+interface FixResult {
+	node: string;
+	addresses_fixed: number;
+	bgp_restarted: number;
+	details?: Array<{ asn: number; interface: string; action: string; result: string }>;
+}
+
+/**
+ * Fetch health data from a single agent node.
+ */
+async function fetchNodeHealth(nodeName: string): Promise<HealthData | null> {
+	const endpoint = await getAgentEndpoint(nodeName);
+	if (!endpoint) return null;
+
+	try {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 10_000);
+
+		const response = await fetch(`${endpoint}/health/sessions`, {
+			method: "GET",
+			headers: {
+				"Authorization": `Bearer ${config.agentToken || ""}`,
+			},
+			signal: controller.signal,
+		});
+
+		clearTimeout(timeout);
+
+		if (!response.ok) return null;
+		return (await response.json()) as HealthData;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Execute health fix on a node.
+ */
+async function fetchHealthFix(nodeName: string): Promise<FixResult | null> {
+	const endpoint = await getAgentEndpoint(nodeName);
+	if (!endpoint) return null;
+
+	try {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 15_000);
+
+		const response = await fetch(`${endpoint}/health/fix`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				"Authorization": `Bearer ${config.agentToken || ""}`,
+			},
+			signal: controller.signal,
+		});
+
+		clearTimeout(timeout);
+
+		if (!response.ok) return null;
+		return (await response.json()) as FixResult;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Render health overview — all nodes summary.
+ */
+async function renderHealthOverview(
+	ctx: BotContext,
+	editMessageId?: number,
+): Promise<void> {
+	const nodes = await getNodes();
+	const nodeNames = Array.from(nodes.keys());
+
+	// Fetch health from all nodes in parallel
+	const healthPromises = nodeNames.map(async (name) => ({
+		name,
+		location: nodes.get(name)?.location || name,
+		health: await fetchNodeHealth(name),
+	}));
+
+	const results = await Promise.all(healthPromises);
+
+	let message = `🏥 *Network Health*\n${DIVIDER}\n\n`;
+
+	const keyboard = new InlineKeyboard();
+	let totalEstablished = 0;
+	let totalBgpDown = 0;
+	let totalWgDown = 0;
+	let totalSessions = 0;
+
+	for (const { name, location, health } of results) {
+		if (!health) {
+			message += `📡 *${escapeMarkdown(name)}* — ${escapeMarkdown(location)}\n`;
+			message += `   ⚫ Agent unreachable\n\n`;
+			keyboard.text(`${name} ⚫`, `hd:${name}`).row();
+			continue;
+		}
+
+		const { summary } = health;
+		totalSessions += summary.total;
+		totalEstablished += summary.established;
+		totalBgpDown += summary.bgp_down;
+		totalWgDown += summary.wg_down;
+
+		message += `📡 *${escapeMarkdown(name)}* — ${escapeMarkdown(location)} (${summary.total})\n   `;
+
+		const parts: string[] = [];
+		if (summary.established > 0) parts.push(`✅ ${summary.established}`);
+		if (summary.bgp_down > 0) parts.push(`⚠️ ${summary.bgp_down} BGP`);
+		if (summary.wg_down > 0) parts.push(`❌ ${summary.wg_down} WG`);
+		if (parts.length === 0) parts.push("—");
+
+		message += parts.join(" | ");
+		message += `\n\n`;
+
+		// Node has issues → show warning indicator
+		const indicator = summary.bgp_down > 0 || summary.wg_down > 0 ? "⚠️" : "✅";
+		keyboard.text(`${indicator} ${name}`, `hd:${name}`);
+	}
+
+	keyboard.row();
+	keyboard.text("🔄 Refresh 刷新", "hov");
+
+	// Footer summary
+	message += `${DIVIDER}\n`;
+	message += `_Total: ${totalSessions} sessions | `;
+	message += `✅ ${totalEstablished} | ⚠️ ${totalBgpDown} | ❌ ${totalWgDown}_\n`;
+	message += `_${new Date().toISOString().slice(0, 19)}_`;
+
+	if (editMessageId) {
+		await ctx.api.editMessageText(ctx.chat!.id, editMessageId, message, {
+			parse_mode: "Markdown",
+			reply_markup: keyboard,
+		});
+	} else {
+		await ctx.reply(message, {
+			parse_mode: "Markdown",
+			reply_markup: keyboard,
+		});
+	}
+}
+
+/**
+ * Render health detail — per-session status for one node.
+ */
+async function renderHealthDetail(
+	ctx: BotContext,
+	nodeName: string,
+	editMessageId?: number,
+): Promise<void> {
+	const health = await fetchNodeHealth(nodeName);
+
+	if (!health) {
+		const message = `🏥 *${escapeMarkdown(nodeName)}* — Agent unreachable\n\n⚫ Cannot connect to agent.`;
+		if (editMessageId) {
+			await ctx.api.editMessageText(ctx.chat!.id, editMessageId, message, {
+				parse_mode: "Markdown",
+			});
+		} else {
+			await ctx.reply(message, { parse_mode: "Markdown" });
+		}
+		return;
+	}
+
+	const { sessions, summary } = health;
+
+	// Sort sessions into groups
+	const established: HealthSessionInfo[] = [];
+	const bgpDown: HealthSessionInfo[] = [];
+	const wgDown: HealthSessionInfo[] = [];
+
+	for (const s of sessions) {
+		if (!s.wg.exists || !s.wg.up) {
+			wgDown.push(s);
+		} else if (s.bgp.state === "Established") {
+			established.push(s);
+		} else {
+			bgpDown.push(s);
+		}
+	}
+
+	// Sort each group by ASN
+	const byAsn = (a: HealthSessionInfo, b: HealthSessionInfo) => a.asn - b.asn;
+	established.sort(byAsn);
+	bgpDown.sort(byAsn);
+	wgDown.sort(byAsn);
+
+	let message = `🏥 *${escapeMarkdown(nodeName)}* — ${summary.total} sessions\n${DIVIDER}\n\n`;
+
+	// Established sessions (compact)
+	if (established.length > 0) {
+		message += `✅ *Established (${established.length}):*\n`;
+		for (const s of established) {
+			const routes = `${s.bgp.routes_imported}↓ ${s.bgp.routes_exported}↑`;
+			message += `├ AS${s.asn} — ${routes}\n`;
+		}
+		message += `\n`;
+	}
+
+	// BGP down but WG OK (the important diagnostic section)
+	if (bgpDown.length > 0) {
+		message += `⚠️ *BGP Down / WG OK (${bgpDown.length}):*\n`;
+		for (const s of bgpDown) {
+			const wgIndicator = s.wg.handshake_ok ? "✅" : "⏳";
+			const hs = s.wg.last_handshake || "—";
+			const ll = s.wg.has_link_local ? "" : " 🚫LL";
+			message += `├ 🟡 AS${s.asn} — BGP: ${s.bgp.state} | WG: ${wgIndicator} ${hs}${ll}\n`;
+		}
+		message += `\n`;
+	}
+
+	// WG down
+	if (wgDown.length > 0) {
+		message += `❌ *WG Down (${wgDown.length}):*\n`;
+		for (const s of wgDown) {
+			const exists = s.wg.exists ? "DOWN" : "MISSING";
+			message += `├ 🔴 AS${s.asn} — WG: ${exists} | BGP: ${s.bgp.state}\n`;
+		}
+		message += `\n`;
+	}
+
+	if (sessions.length === 0) {
+		message += `_(no sessions)_\n\n`;
+	}
+
+	message += `_${new Date().toISOString().slice(0, 19)}_`;
+
+	// Keyboard
+	const keyboard = new InlineKeyboard();
+	if (summary.bgp_down > 0 || summary.wg_down > 0) {
+		keyboard.text(`🔧 Fix ${nodeName}`, `hfix:${nodeName}`);
+	}
+	keyboard.text("🔄 Refresh", `hd:${nodeName}`);
+	keyboard.row();
+	keyboard.text("⬅️ Back 返回", "hov");
+
+	if (editMessageId) {
+		await ctx.api.editMessageText(ctx.chat!.id, editMessageId, message, {
+			parse_mode: "Markdown",
+			reply_markup: keyboard,
+		});
+	} else {
+		await ctx.reply(message, {
+			parse_mode: "Markdown",
+			reply_markup: keyboard,
+		});
+	}
+}
+
+/**
+ * Execute health fix on a node and display results.
+ */
+async function executeHealthFix(
+	ctx: BotContext,
+	nodeName: string,
+): Promise<void> {
+	const result = await fetchHealthFix(nodeName);
+
+	if (!result) {
+		await ctx.api.sendMessage(
+			ctx.chat!.id,
+			`❌ Fix failed: could not reach ${nodeName} agent.`,
+		);
+		return;
+	}
+
+	let message = `🔧 *Fix Results — ${escapeMarkdown(nodeName)}*\n${DIVIDER}\n\n`;
+	message += `📍 Addresses fixed: ${result.addresses_fixed}\n`;
+	message += `🔄 BGP restarted: ${result.bgp_restarted}\n`;
+
+	if (result.details && result.details.length > 0) {
+		message += `\n*Details:*\n`;
+		for (const d of result.details) {
+			const icon = d.result === "ok" ? "✅" : "❌";
+			message += `${icon} AS${d.asn} — ${d.action}: ${d.result}\n`;
+		}
+	} else if (result.addresses_fixed === 0) {
+		message += `\n_No issues found to fix. 没有需要修复的问题。_\n`;
+	}
+
+	const keyboard = new InlineKeyboard();
+	keyboard.text("🔄 Refresh Health", `hd:${nodeName}`);
+	keyboard.text("⬅️ Back", "hov");
+
+	await ctx.api.sendMessage(ctx.chat!.id, message, {
+		parse_mode: "Markdown",
+		reply_markup: keyboard,
+	});
 }
