@@ -554,6 +554,15 @@ async function handleMesh(
 ): Promise<Response> {
 	const models = getModels();
 
+	// Mesh disabled (inter-AS demo): no auto full-mesh — the only links are the
+	// paid eBGP peerings created via the session flow.
+	if (!config.features.meshEnabled) {
+		return success(c, {
+			self: { nodeName: routerRecord.get("name") as string },
+			peers: [],
+		});
+	}
+
 	// Build self info from the requesting router
 	const selfNodeId = (routerRecord.get("nodeId") as number) ?? 0;
 	const selfNodeName = routerRecord.get("name") as string;

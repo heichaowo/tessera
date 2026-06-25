@@ -79,6 +79,9 @@ export default {
 	features: {
 		enableTelegramBot: process.env.TELEGRAM_BOT_ENABLED === "true",
 		telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
+		// Auto full-mesh / iBGP backbone. Disabled for the inter-AS demo so the
+		// only links are the paid eBGP peerings. Set MESH_ENABLED=true to restore.
+		meshEnabled: process.env.MESH_ENABLED === "true",
 	},
 
 	// Arc x402 / Circle Nanopayments (testnet)
