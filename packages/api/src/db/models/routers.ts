@@ -28,6 +28,7 @@ export interface RouterAttributes {
 	legacyLla: string | null; // Legacy link-local address for existing peer connections
 	bootstrapToken: string | null; // Token for bootstrap script generation
 	walletAddress: string | null; // Operator EOA wallet for x402 peering settlement (Arc)
+	asn: number | null; // Node's ASN for autonomous eBGP peering
 	createdAt?: Date;
 	updatedAt?: Date;
 }
@@ -150,6 +151,11 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
 			walletAddress: {
 				field: "wallet_address",
 				type: DataTypes.STRING(42),
+				allowNull: true,
+			},
+			asn: {
+				field: "asn",
+				type: DataTypes.BIGINT,
 				allowNull: true,
 			},
 		},

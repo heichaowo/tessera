@@ -13,6 +13,7 @@ import {
 } from "../schemas/peering";
 import { isValidationError, validateBody } from "../schemas/validate";
 import { determineInitialStatus } from "../services/workflowEngine";
+import { buildNodePeering, toPeerNode } from "../services/nodePeering";
 import { requireGatewayPayment } from "../services/x402";
 
 interface JWTPayload {
@@ -163,6 +164,24 @@ async function createSession(
 		paymentInfo = { payer: pay.payer, amountUsdc: pay.amountUsdc, tx: pay.tx };
 	}
 
+	// Node-to-node peering enrichment: when both requester and target are MoeNet
+	// nodes that have checked in (wg key + public IP known), build the real
+	// WireGuard/LLA link params deterministically + (below) the reciprocal
+	// session, so both agents bring up the tunnel + eBGP.
+	let link: ReturnType<typeof buildNodePeering> | null = null;
+	let requesterUuid: string | null = null;
+	if (paymentInfo && user.person) {
+		const requesterRouter = await models.routers.findOne({
+			where: { name: user.person },
+		});
+		const a = requesterRouter ? toPeerNode(requesterRouter) : null;
+		const b = toPeerNode(router);
+		if (a && b && a.uuid !== b.uuid) {
+			link = buildNodePeering(a, b);
+			requesterUuid = a.uuid;
+		}
+	}
+
 	// Create new session
 	const sessionUuid = generateUUID();
 	const interfaceName = getInterfaceName(asn);
@@ -174,25 +193,55 @@ async function createSession(
 		{ paid: !!paymentInfo },
 	);
 
+	const fwd = link?.bSide;
 	await models.bgpSessions.create({
 		uuid: sessionUuid,
 		router: data.router,
 		asn,
 		status: initialStatus,
-		mtu: data.mtu || 1420,
-		policy: SessionPolicy.FULL,
-		ipv4: data.ipv4 || null,
-		ipv6: data.ipv6 || null,
-		ipv6LinkLocal: data.ipv6LinkLocal || null,
+		mtu: fwd ? fwd.mtu : data.mtu || 1420,
+		policy: fwd ? fwd.policy : SessionPolicy.FULL,
+		ipv4: fwd ? null : data.ipv4 || null,
+		ipv6: fwd ? null : data.ipv6 || null,
+		ipv6LinkLocal: fwd ? fwd.ipv6LinkLocal : data.ipv6LinkLocal || null,
 		type: "wireguard",
 		extensions: data.extensions ? JSON.stringify(data.extensions) : null,
-		interface: interfaceName,
-		endpoint: data.endpoint || null,
-		credential: data.publicKey || null,
+		interface: fwd ? fwd.interface : interfaceName,
+		endpoint: fwd ? fwd.endpoint : data.endpoint || null,
+		credential: fwd ? fwd.credential : data.publicKey || null,
 		data: paymentInfo ? JSON.stringify({ payment: paymentInfo }) : null,
 		lastError:
 			initialStatus === PeeringStatus.REJECTED ? "ASN is blocked" : null,
 	});
+
+	// Reciprocal session on the requester's router so its agent builds the other
+	// half of the tunnel (dedupe: skip if that pair already exists).
+	if (link && requesterUuid) {
+		const recip = link.aSide;
+		const existing = await models.bgpSessions.findOne({
+			where: { router: requesterUuid, asn: recip.asn },
+		});
+		if (!existing) {
+			await models.bgpSessions.create({
+				uuid: generateUUID(),
+				router: recip.router,
+				asn: recip.asn,
+				status: PeeringStatus.QUEUED_FOR_SETUP,
+				mtu: recip.mtu,
+				policy: recip.policy,
+				ipv4: null,
+				ipv6: null,
+				ipv6LinkLocal: recip.ipv6LinkLocal,
+				type: recip.type,
+				extensions: null,
+				interface: recip.interface,
+				endpoint: recip.endpoint,
+				credential: recip.credential,
+				data: JSON.stringify({ reciprocalOf: sessionUuid, payment: paymentInfo }),
+				lastError: null,
+			});
+		}
+	}
 
 	const messages: Record<string, string> = {
 		manual: "Session created, pending review",

@@ -302,7 +302,9 @@ async function handleSessions(c: Context, router: string): Promise<Response> {
 			data: typeof s.data === "string" ? JSON.parse(s.data) : s.data || null,
 			mtu: s.mtu,
 			port,
-			policy: s.policy,
+			// Agent expects policy as a string (its BIRD template ignores the value).
+			policy:
+				["full", "peer", "upstream", "downstream"][Number(s.policy)] ?? "peer",
 			lastError: s.lastError,
 		};
 	});
