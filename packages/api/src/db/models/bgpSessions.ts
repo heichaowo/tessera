@@ -69,7 +69,7 @@ export function initBgpSessionsModel(sequelize: Sequelize): BgpSessionsModel {
 				allowNull: false,
 			},
 			asn: {
-				type: DataTypes.INTEGER.UNSIGNED,
+				type: DataTypes.BIGINT,
 				allowNull: false,
 			},
 			status: {

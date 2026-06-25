@@ -9,6 +9,7 @@ export interface UserAttributes {
 	id: number;
 	asn: number;
 	telegramId: number | null;
+	username: string | null;
 	person: string | null;
 	isAdmin: boolean;
 	isBlocked: boolean;
@@ -28,7 +29,7 @@ export function initUsersModel(sequelize: Sequelize): UsersModel {
 				autoIncrement: true,
 			},
 			asn: {
-				type: DataTypes.INTEGER.UNSIGNED,
+				type: DataTypes.BIGINT,
 				allowNull: false,
 				unique: true,
 			},
@@ -37,6 +38,10 @@ export function initUsersModel(sequelize: Sequelize): UsersModel {
 				type: DataTypes.BIGINT,
 				allowNull: true,
 				unique: true,
+			},
+			username: {
+				type: DataTypes.STRING(64),
+				allowNull: true,
 			},
 			person: {
 				type: DataTypes.STRING,

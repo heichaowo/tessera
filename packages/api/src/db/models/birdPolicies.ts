@@ -74,7 +74,7 @@ export function initBirdPoliciesModel(sequelize: Sequelize): BirdPoliciesModel {
 			},
 			dn42As: {
 				field: "dn42_as",
-				type: DataTypes.INTEGER.UNSIGNED,
+				type: DataTypes.BIGINT,
 				allowNull: false,
 				defaultValue: 4242420998,
 			},
