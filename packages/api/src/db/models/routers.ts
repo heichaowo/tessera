@@ -27,6 +27,7 @@ export interface RouterAttributes {
 	regionCode: number | null; // Region code for communities (101=AS-E, 203=NA-W, 302=EU-C)
 	legacyLla: string | null; // Legacy link-local address for existing peer connections
 	bootstrapToken: string | null; // Token for bootstrap script generation
+	walletAddress: string | null; // Operator EOA wallet for x402 peering settlement (Arc)
 	createdAt?: Date;
 	updatedAt?: Date;
 }
@@ -145,6 +146,11 @@ export function initRoutersModel(sequelize: Sequelize): RoutersModel {
 				type: DataTypes.STRING(32),
 				allowNull: true,
 				unique: true,
+			},
+			walletAddress: {
+				field: "wallet_address",
+				type: DataTypes.STRING(42),
+				allowNull: true,
 			},
 		},
 		{

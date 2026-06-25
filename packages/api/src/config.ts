@@ -80,4 +80,25 @@ export default {
 		enableTelegramBot: process.env.TELEGRAM_BOT_ENABLED === "true",
 		telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
 	},
+
+	// Arc x402 / Circle Nanopayments (testnet)
+	arc: {
+		// Master switch — when false, peering works exactly as before (no payment).
+		enabled: process.env.ARC_X402_ENABLED === "true",
+		// CAIP-2 network id; Arc Testnet = eip155:5042002
+		network: process.env.ARC_NETWORK || "eip155:5042002",
+		// USDC ERC-20 interface on Arc Testnet (6 decimals)
+		usdc: process.env.ARC_USDC || "0x3600000000000000000000000000000000000000",
+		// Gateway Wallet contract (EIP-3009 verifyingContract)
+		gatewayWallet:
+			process.env.ARC_GATEWAY_WALLET ||
+			"0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+		facilitatorUrl:
+			process.env.ARC_FACILITATOR_URL ||
+			"https://gateway-api-testnet.circle.com",
+		// EIP-3009 validBefore window; Gateway requires >= 7 days (604800s)
+		maxTimeoutSeconds: Number(process.env.ARC_MAX_TIMEOUT_SECONDS) || 604800,
+		// One-time peering fee, in dollars (e.g. "$0.001")
+		peeringPrice: process.env.ARC_PEERING_PRICE || "$0.001",
+	},
 };

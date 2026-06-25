@@ -13,6 +13,7 @@ import {
 } from "../schemas/peering";
 import { isValidationError, validateBody } from "../schemas/validate";
 import { determineInitialStatus } from "../services/workflowEngine";
+import { requireGatewayPayment } from "../services/x402";
 
 interface JWTPayload {
 	asn: string;
@@ -130,6 +131,29 @@ async function createSession(
 		);
 	}
 
+	// x402 payment gate — fee is paid to the target node's operator wallet,
+	// enabling agent-to-agent settlement. Disabled unless ARC_X402_ENABLED=true.
+	let paymentInfo: { payer: string; amountUsdc: string; tx: string | null } | null =
+		null;
+	if (config.arc.enabled) {
+		const payTo = router.get("walletAddress") as string | null;
+		if (!payTo) {
+			return makeResponse(
+				c,
+				ResponseCode.INTERNAL_ERROR,
+				undefined,
+				"Target router has no payment wallet configured",
+			);
+		}
+		const pay = await requireGatewayPayment(c, {
+			price: config.arc.peeringPrice,
+			payTo,
+			resource: `moenet:session:${data.router}:AS${asn}`,
+		});
+		if (!pay.paid) return pay.response;
+		paymentInfo = { payer: pay.payer, amountUsdc: pay.amountUsdc, tx: pay.tx };
+	}
+
 	// Create new session
 	const sessionUuid = generateUUID();
 	const interfaceName = getInterfaceName(asn);
@@ -153,7 +177,7 @@ async function createSession(
 		interface: interfaceName,
 		endpoint: data.endpoint || null,
 		credential: data.publicKey || null,
-		data: null,
+		data: paymentInfo ? JSON.stringify({ payment: paymentInfo }) : null,
 		lastError:
 			initialStatus === PeeringStatus.REJECTED ? "ASN is blocked" : null,
 	});
