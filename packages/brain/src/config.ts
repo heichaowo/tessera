@@ -18,6 +18,19 @@ export default {
 		chain: process.env.ARC_CHAIN || "arcTestnet",
 	},
 
+	// Negotiable price band (USDC). Providers won't sell below floor; target is
+	// the list price; premium is the ceiling for priority/cold-potato peering.
+	price: {
+		floorUsd: Number(process.env.ARC_PRICE_FLOOR) || 0.0005,
+		targetUsd: Number(process.env.ARC_PRICE_TARGET) || 0.001,
+		premiumUsd: Number(process.env.ARC_PRICE_PREMIUM) || 0.01,
+	},
+
+	// Where each agent persists what it has learned about its peers.
+	reputationFile: process.env.BRAIN_REPUTATION_FILE || ".brain-reputation.json",
+	// Peers with reputation below this are avoided entirely.
+	reputationFloor: Number(process.env.BRAIN_REPUTATION_FLOOR) || 0.3,
+
 	// Decide + log, but don't pay or create sessions (safe local runs).
 	dryRun: process.env.BRAIN_DRY_RUN === "true",
 

@@ -32,6 +32,9 @@ export interface DecisionContext {
 	budgetRemainingUsd: number;
 	policy: string;
 	candidates: Candidate[];
+	// Optional peer reputation (peerName -> score 0..1). Unknown peers are
+	// treated as neutral (0.5); known-bad peers (< 0.3) are dropped.
+	reputation?: Record<string, number>;
 }
 
 export interface Decision {
