@@ -276,6 +276,11 @@ BIRD_CONF_EOF
 # Create empty include files to prevent BIRD errors
 touch /etc/bird/peers/.keep
 touch /etc/bird/ibgp.d/.keep
+# BIRD include stubs the agent-rendered bird.conf depends on.
+# Without these, bird.conf's include directives fail and the WHOLE config
+# silently falls back to the bootstrap minimal config (no BGP peers load).
+echo "define MAINTENANCE_MODE = false;" > /etc/bird/maintenance.conf
+echo "# blacklist (managed by agent)" > /etc/bird/blacklist.conf
 chown -R root:root /etc/bird
 
 # Download Agent
