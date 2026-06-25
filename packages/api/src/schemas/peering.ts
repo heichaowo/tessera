@@ -50,6 +50,9 @@ export const CreateSessionSchema = z.object({
 				z.enum(["mp_bgp", "extended_nexthop", "add_path", "graceful_restart"]),
 			)
 			.optional(),
+		// Negotiated peering price (USDC), agreed agent-to-agent. Server clamps
+		// it into the configured [floor, premium] band before settlement.
+		agreedPriceUsd: z.number().positive().optional(),
 	}),
 });
 

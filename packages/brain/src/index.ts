@@ -7,6 +7,7 @@
  */
 
 import { AgentBrain } from "./agent";
+import { NegotiationBroker } from "./broker";
 import config from "./config";
 import type { AgentIdentity } from "./types";
 
@@ -38,7 +39,8 @@ console.log(
 		`dryRun=${config.dryRun})`,
 );
 
-const brains = identities.map((id) => new AgentBrain(id));
+const broker = new NegotiationBroker();
+const brains = identities.map((id) => new AgentBrain(id, broker));
 for (const b of brains) {
 	await b.tick();
 }

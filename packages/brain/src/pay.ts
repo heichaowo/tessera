@@ -17,6 +17,7 @@ export async function payAndPeer(opts: {
 	privateKey: `0x${string}`;
 	jwt: string;
 	routerUuid: string;
+	agreedPriceUsd?: number;
 }): Promise<PayResult> {
 	const client = new GatewayClient({
 		chain: config.arc.chain as "arcTestnet",
@@ -29,13 +30,18 @@ export async function payAndPeer(opts: {
 		await client.deposit("0.5");
 	}
 
+	const sessionData: Record<string, unknown> = { router: opts.routerUuid };
+	if (opts.agreedPriceUsd != null) {
+		sessionData.agreedPriceUsd = opts.agreedPriceUsd;
+	}
+
 	const { status, data } = await client.pay(`${config.coreUrl}/api/v1/session`, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${opts.jwt}`,
 		},
-		body: { action: "create", data: { router: opts.routerUuid } },
+		body: { action: "create", data: sessionData },
 	});
 
 	return { status, data };

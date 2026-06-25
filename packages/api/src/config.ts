@@ -100,5 +100,9 @@ export default {
 		maxTimeoutSeconds: Number(process.env.ARC_MAX_TIMEOUT_SECONDS) || 604800,
 		// One-time peering fee, in dollars (e.g. "$0.001")
 		peeringPrice: process.env.ARC_PEERING_PRICE || "$0.001",
+		// Negotiable price band (USDC). A negotiated price from the agents is
+		// clamped into [floor, premium]; outside this, settlement is rejected.
+		priceFloorUsd: Number(process.env.ARC_PRICE_FLOOR) || 0.0005,
+		pricePremiumUsd: Number(process.env.ARC_PRICE_PREMIUM) || 0.01,
 	},
 };

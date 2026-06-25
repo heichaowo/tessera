@@ -26,10 +26,13 @@ export default {
 		premiumUsd: Number(process.env.ARC_PRICE_PREMIUM) || 0.01,
 	},
 
-	// Where each agent persists what it has learned about its peers.
-	reputationFile: process.env.BRAIN_REPUTATION_FILE || ".brain-reputation.json",
+	// Where agents persist what they have learned about peers (one file per
+	// buyer/provider identity lives under this directory).
+	reputationDir: process.env.BRAIN_REPUTATION_DIR || ".brain-rep",
 	// Peers with reputation below this are avoided entirely.
 	reputationFloor: Number(process.env.BRAIN_REPUTATION_FLOOR) || 0.3,
+	// Buyers open negotiation at this fraction of the list price.
+	openOfferFactor: Number(process.env.BRAIN_OPEN_OFFER) || 0.7,
 
 	// Decide + log, but don't pay or create sessions (safe local runs).
 	dryRun: process.env.BRAIN_DRY_RUN === "true",

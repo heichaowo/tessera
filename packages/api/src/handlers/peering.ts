@@ -145,8 +145,17 @@ async function createSession(
 				"Target router has no payment wallet configured",
 			);
 		}
+		// Use the agent-negotiated price when provided, clamped into the band.
+		const listUsd = Number.parseFloat(config.arc.peeringPrice.replace("$", ""));
+		const priceUsd =
+			data.agreedPriceUsd != null
+				? Math.min(
+						Math.max(data.agreedPriceUsd, config.arc.priceFloorUsd),
+						config.arc.pricePremiumUsd,
+					)
+				: listUsd;
 		const pay = await requireGatewayPayment(c, {
-			price: config.arc.peeringPrice,
+			price: `$${priceUsd}`,
 			payTo,
 			resource: `moenet:session:${data.router}:AS${asn}`,
 		});
