@@ -219,6 +219,8 @@ export default async function agentHandler(c: Context): Promise<Response> {
 			return await handleBirdConfig(c, routerRecord);
 		case "rtt":
 			return await handleRtt(c, routerUuid);
+		case "peers":
+			return await handlePeers(c, routerUuid, routerRecord);
 		default:
 			return makeResponse(
 				c,
@@ -717,6 +719,128 @@ async function handleConfig(
 	};
 
 	return success(c, agentConfig);
+}
+
+/**
+ * GET /agent/:router/peers
+ *
+ * Peer discovery for autonomous peering. Returns the candidate nodes the
+ * requesting agent can establish a *paid* peering session with, bundled with
+ * every input an autonomous agent (or its LLM brain) needs to decide who to
+ * peer with and how much to pay:
+ *   - latency: the requesting node's own RTT probe to the candidate (Redis)
+ *   - regionCode / sameRegion: geographic proximity
+ *   - capacity: candidate's free peer slots
+ *   - payTo: the candidate operator's wallet (x402 payee — per-node settlement)
+ *   - price: current peering fee
+ *
+ * The agent measures latency from its own vantage point, so the decision is
+ * location-aware (e.g. LAX prefers LAS on latency; ties broken by other inputs).
+ */
+async function handlePeers(
+	c: Context,
+	router: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Sequelize model instance
+	routerRecord: any,
+): Promise<Response> {
+	const models = getModels();
+	const selfRegion = (routerRecord.get("regionCode") as number) ?? 0;
+
+	// All other nodes are potential peering targets.
+	const candidates = await models.routers.findAll({
+		attributes: [
+			"uuid",
+			"name",
+			"location",
+			"regionCode",
+			"publicIp",
+			"publicIpv6",
+			"wgPublicKey",
+			"walletAddress",
+			"bandwidth",
+			"maxPeers",
+			"supportsIpv4",
+			"supportsIpv6",
+			"lastSeen",
+		],
+		where: { uuid: { [Op.ne]: router } },
+	});
+
+	// This node's RTT probes (target -> { rtt_ms, loss }), if reported.
+	const rttMap: Record<string, { rtt_ms: number; loss: number }> = {};
+	try {
+		const redis = getRedis();
+		const raw = await redis.hgetall(`rtt:${router}`);
+		for (const [target, val] of Object.entries(raw)) {
+			try {
+				const p = JSON.parse(val);
+				if (typeof p.rtt_ms === "number") {
+					rttMap[target] = { rtt_ms: p.rtt_ms, loss: p.loss ?? 0 };
+				}
+			} catch {
+				/* ignore malformed entries */
+			}
+		}
+	} catch {
+		/* redis optional — latency simply absent */
+	}
+
+	const peers = await Promise.all(
+		candidates.map(async (r: { get: (key: string) => unknown }) => {
+			const uuid = r.get("uuid") as string;
+			const publicIp = r.get("publicIp") as string | null;
+			const publicIpv6 = r.get("publicIpv6") as string | null;
+			const wallet = r.get("walletAddress") as string | null;
+			const maxPeers = (r.get("maxPeers") as number) ?? 0;
+			const region = (r.get("regionCode") as number) ?? 0;
+
+			const used = await models.bgpSessions.count({
+				where: { router: uuid, status: PeeringStatus.ENABLED },
+			});
+
+			// Match the RTT probe by the candidate's public address.
+			const latency =
+				(publicIp && rttMap[publicIp]) ||
+				(publicIpv6 && rttMap[publicIpv6]) ||
+				null;
+
+			return {
+				uuid,
+				name: r.get("name"),
+				location: r.get("location"),
+				regionCode: region,
+				sameRegion: region === selfRegion,
+				endpoint: { ipv4: publicIp, ipv6: publicIpv6 },
+				wgPublicKey: r.get("wgPublicKey"),
+				payTo: wallet,
+				payable: !!wallet,
+				bandwidth: r.get("bandwidth"),
+				capacity: {
+					max: maxPeers,
+					used,
+					available: Math.max(0, maxPeers - used),
+				},
+				supportsIpv4: r.get("supportsIpv4"),
+				supportsIpv6: r.get("supportsIpv6"),
+				lastSeen: r.get("lastSeen"),
+				latency,
+			};
+		}),
+	);
+
+	return success(c, {
+		self: {
+			uuid: router,
+			name: routerRecord.get("name"),
+			regionCode: selfRegion,
+		},
+		price: {
+			base: config.arc.peeringPrice,
+			currency: "USDC",
+			network: config.arc.network,
+		},
+		peers,
+	});
 }
 
 /**
