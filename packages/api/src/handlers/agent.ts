@@ -722,7 +722,9 @@ async function handleConfig(
 			pingWorkers: 32,
 		},
 		autoUpdate: {
-			enabled: true,
+			// Disabled: nodes run a custom agent build for the demo; auto-update
+			// would overwrite it with the upstream release.
+			enabled: process.env.AGENT_AUTOUPDATE === "true",
 			checkInterval: 60,
 			channel: "stable",
 			githubRepo: "heichaowo/moenet-agent",
@@ -1014,6 +1016,7 @@ async function handleBirdConfig(
 		configHash,
 		node: {
 			id: nodeId,
+			asn: Number(routerRecord.get("asn")) || config.dn42.asn,
 			name: nodeName,
 			type: nodeType,
 			bandwidth,
