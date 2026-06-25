@@ -73,7 +73,7 @@ export function initBgpSessionsModel(sequelize: Sequelize): BgpSessionsModel {
 				allowNull: false,
 			},
 			status: {
-				type: DataTypes.TINYINT.UNSIGNED,
+				type: DataTypes.SMALLINT,
 				allowNull: false,
 				defaultValue: PeeringStatus.PENDING_REVIEW,
 			},
@@ -83,7 +83,7 @@ export function initBgpSessionsModel(sequelize: Sequelize): BgpSessionsModel {
 				defaultValue: 1420,
 			},
 			policy: {
-				type: DataTypes.TINYINT.UNSIGNED,
+				type: DataTypes.SMALLINT,
 				allowNull: false,
 				defaultValue: SessionPolicy.FULL,
 			},
