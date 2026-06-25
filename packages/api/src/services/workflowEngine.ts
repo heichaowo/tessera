@@ -168,13 +168,25 @@ export async function isBlocked(asn: number): Promise<boolean> {
  * @param asn - The peer's ASN
  * @returns Object with status and workflowType
  */
-export async function determineInitialStatus(asn: number): Promise<{
+export async function determineInitialStatus(
+	asn: number,
+	opts?: { paid?: boolean },
+): Promise<{
 	status: PeeringStatus;
 	workflowType: "auto_approve" | "auto_reject" | "manual";
 }> {
-	// Blacklist check first
+	// Blacklist check first — a blocked ASN is rejected even if paid.
 	if (await isBlocked(asn)) {
 		return { status: PeeringStatus.REJECTED, workflowType: "auto_reject" };
+	}
+
+	// Paid peering (x402) auto-approves straight to the setup queue, so the
+	// agent builds the tunnel without manual review.
+	if (opts?.paid) {
+		return {
+			status: PeeringStatus.QUEUED_FOR_SETUP,
+			workflowType: "auto_approve",
+		};
 	}
 
 	// Auto-approve whitelist

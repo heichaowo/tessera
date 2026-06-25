@@ -158,9 +158,12 @@ async function createSession(
 	const sessionUuid = generateUUID();
 	const interfaceName = getInterfaceName(asn);
 
-	// Determine initial status via workflow engine (auto-approve / blacklist / manual)
-	const { status: initialStatus, workflowType } =
-		await determineInitialStatus(asn);
+	// Determine initial status via workflow engine. A paid (x402) session
+	// auto-approves straight to the setup queue so the agent builds the tunnel.
+	const { status: initialStatus, workflowType } = await determineInitialStatus(
+		asn,
+		{ paid: !!paymentInfo },
+	);
 
 	await models.bgpSessions.create({
 		uuid: sessionUuid,
