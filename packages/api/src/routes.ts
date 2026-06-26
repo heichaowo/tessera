@@ -5,6 +5,7 @@ import authHandler from "./handlers/auth";
 import bootstrapHandler from "./handlers/bootstrap";
 import flapHandler from "./handlers/flap";
 import metricsHandler from "./handlers/metrics";
+import networkHandler from "./handlers/network";
 import peeringHandler from "./handlers/peering";
 
 export function registerRoutes(app: Hono) {
@@ -34,4 +35,7 @@ export function registerRoutes(app: Hono) {
 
 	// Metrics
 	app.get("/api/v1/metrics", metricsHandler);
+
+	// Public read-only network state for the live dashboard
+	app.get("/api/v1/network", networkHandler);
 }
