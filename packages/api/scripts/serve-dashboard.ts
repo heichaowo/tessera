@@ -7,6 +7,14 @@
 
 const CORE = process.env.CORE_URL || "http://127.0.0.1:3000";
 const htmlPath = new URL("../public/dashboard.html", import.meta.url);
+// Mapbox public token is injected at serve time (it's a client-side public
+// token, but GitHub push-protection blocks it from the repo).
+const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN || "";
+
+async function renderHtml(): Promise<string> {
+	const t = await Bun.file(htmlPath).text();
+	return t.replaceAll("__MAPBOX_TOKEN__", MAPBOX_TOKEN);
+}
 
 const server = Bun.serve({
 	port: Number(process.env.DASHBOARD_PORT) || 80,
@@ -16,7 +24,7 @@ const server = Bun.serve({
 		const url = new URL(req.url);
 
 		if (url.pathname === "/" || url.pathname === "/index.html") {
-			return new Response(Bun.file(htmlPath), {
+			return new Response(await renderHtml(), {
 				headers: { "content-type": "text/html; charset=utf-8" },
 			});
 		}
