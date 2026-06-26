@@ -19,6 +19,14 @@ export interface DealResult {
 	priceUsd: number;
 	source: "llm" | "rules";
 	log: string;
+	// structured detail for the live negotiation panel
+	requester: string;
+	provider: string;
+	listUsd: number;
+	offerUsd: number;
+	decision: "accept" | "counter" | "reject";
+	reason: string;
+	requesterScore: number;
 }
 
 function round6(n: number): number {
@@ -90,6 +98,18 @@ export class NegotiationBroker {
 			`(rep ${requesterScore.toFixed(2)}) → ${result.decision} $${result.priceUsd} ` +
 			`[${source}] ⇒ ${verdict} — ${result.reason}`;
 
-		return { agreed, priceUsd: round6(priceUsd), source, log };
+		return {
+			agreed,
+			priceUsd: round6(priceUsd),
+			source,
+			log,
+			requester: opts.requester,
+			provider: opts.provider,
+			listUsd: opts.listUsd,
+			offerUsd,
+			decision: result.decision,
+			reason: result.reason,
+			requesterScore: round6(requesterScore),
+		};
 	}
 }

@@ -107,5 +107,21 @@ export default {
 		// clamped into [floor, premium]; outside this, settlement is rejected.
 		priceFloorUsd: Number(process.env.ARC_PRICE_FLOOR) || 0.0005,
 		pricePremiumUsd: Number(process.env.ARC_PRICE_PREMIUM) || 0.01,
+		// M2b-3 usage-based net settlement: price per GB of net traffic
+		// imbalance; the net receiver pays the net sender each window.
+		usagePricePerGbUsd: Number(process.env.ARC_USAGE_PRICE_PER_GB) || 0.1,
+		// Don't bother settling below this dollar amount (avoids dust txns).
+		usageMinSettleUsd: Number(process.env.ARC_USAGE_MIN_SETTLE) || 0.0001,
+		// Bilateral cross-attestation: a direction's sender-tx vs receiver-rx may
+		// differ by packet loss + sampling skew. Flag a discrepancy only when the
+		// gap exceeds max(usageDiscrepancyMinBytes, usageLossBandPct * sender).
+		// Honest two-sided readings agree to ~0% with occasional sampling-skew
+		// outliers up to ~25% on the lossy UDP testbed; gross cheating shows
+		// 100%+. 0.4 cleanly separates the two (tighten for real data planes).
+		usageLossBandPct: Number(process.env.ARC_USAGE_LOSS_BAND) || 0.4,
+		// Floor absorbs heartbeat sampling skew: the two ends sample ~5s apart, so
+		// an active direction can differ by ~rate*5s (~1-5MB) with no loss/cheat.
+		usageDiscrepancyMinBytes:
+			Number(process.env.ARC_USAGE_DISCREPANCY_MIN_BYTES) || 5_000_000,
 	},
 };

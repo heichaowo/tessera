@@ -17,17 +17,19 @@ interface RateLimitConfig {
 
 // Route-specific configurations
 const ROUTE_LIMITS: Record<string, RateLimitConfig> = {
-	"/agent": {
+	// Agents share one bucket (direct connections key to "unknown"); with 4
+	// nodes heartbeating every 5s plus sync/report traffic, allow ample headroom.
+	"/api/v1/agent": {
 		windowMs: 60 * 1000,
-		maxRequests: 300,
+		maxRequests: 1200,
 		keyPrefix: "rl:agent",
 	},
-	"/auth": {
+	"/api/v1/auth": {
 		windowMs: 60 * 1000,
 		maxRequests: 60,
 		keyPrefix: "rl:auth",
 	},
-	"/admin": {
+	"/api/v1/admin": {
 		windowMs: 60 * 1000,
 		maxRequests: 30,
 		keyPrefix: "rl:admin",

@@ -7,6 +7,13 @@ import flapHandler from "./handlers/flap";
 import metricsHandler from "./handlers/metrics";
 import networkHandler from "./handlers/network";
 import peeringHandler from "./handlers/peering";
+import usageSettlementHandler, {
+	demoCheatHandler,
+	demoResetHandler,
+	negotiationHandler,
+	usageListHandler,
+	usageMemoHandler,
+} from "./handlers/usageSettlement";
 
 export function registerRoutes(app: Hono) {
 	// Bootstrap API (for node initialization)
@@ -38,4 +45,14 @@ export function registerRoutes(app: Hono) {
 
 	// Public read-only network state for the live dashboard
 	app.get("/api/v1/network", networkHandler);
+
+	// M2b-3 usage-based net settlement (per-tunnel usage + x402-gated settle)
+	app.get("/api/v1/usage/:node", usageListHandler);
+	app.post("/api/v1/usage-settlement", usageSettlementHandler);
+	app.post("/api/v1/usage-settlement/memo", usageMemoHandler);
+	app.post("/api/v1/negotiation", negotiationHandler);
+
+	// Public, auto-reverting demo control (simulate a cheating agent)
+	app.post("/api/v1/demo/cheat", demoCheatHandler);
+	app.post("/api/v1/demo/reset", demoResetHandler);
 }

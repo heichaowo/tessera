@@ -528,6 +528,73 @@ async function handleGlobalHeartbeat(c: Context): Promise<Response> {
 
 	await models.routers.update(updatePayload, { where: { name: nodeId } });
 
+	// Live traffic: compute up/down rate (bytes/s) from cumulative tx/rx deltas
+	// against the previous heartbeat sample, stored in Redis for the dashboard.
+	try {
+		const redis = getRedis();
+		const now = Date.now();
+		const tx = Number(status.tx) || 0;
+		const rx = Number(status.rx) || 0;
+		const key = `traffic:${nodeId}`;
+		const prev = await redis.hgetall(key);
+		let upBps = 0;
+		let downBps = 0;
+		if (prev.tx && prev.ts) {
+			const dt = (now - Number(prev.ts)) / 1000;
+			if (dt > 0 && tx >= Number(prev.tx)) {
+				upBps = Math.round((tx - Number(prev.tx)) / dt);
+				downBps = Math.round((rx - Number(prev.rx)) / dt);
+			}
+		}
+		await redis.hset(key, {
+			tx,
+			rx,
+			ts: now,
+			upBps,
+			downBps,
+			load: String(status.loadAvg ?? ""),
+			uptime: Number(status.uptime) || 0,
+		});
+		await redis.expire(key, 600);
+	} catch {
+		/* redis optional */
+	}
+
+	// Per-tunnel usage (M2b-3): store each peering tunnel's cumulative tx/rx +
+	// rate, keyed by (node, peerAsn), for usage-based net settlement.
+	try {
+		const tunnels = Array.isArray(status.tunnels) ? status.tunnels : [];
+		if (tunnels.length) {
+			const redis = getRedis();
+			const now = Date.now();
+			// DEMO/TEST ONLY: simulate a malicious agent over-reporting sent bytes,
+			// to prove bilateral cross-attestation flags the discrepancy. Off unless
+			// `demo:cheat:<node>` is set (a tx multiplier, e.g. "3"). Never set in prod.
+			const cheat = Number(await redis.get(`demo:cheat:${nodeId}`)) || 0;
+			for (const t of tunnels) {
+				const peerAsn = Number(t.peerAsn) || 0;
+				if (!peerAsn) continue;
+				const tx = cheat > 0 ? Math.round((Number(t.tx) || 0) * cheat) : Number(t.tx) || 0;
+				const rx = Number(t.rx) || 0;
+				const key = `tunnel:${nodeId}:${peerAsn}`;
+				const prev = await redis.hgetall(key);
+				let txBps = 0;
+				let rxBps = 0;
+				if (prev.tx && prev.ts) {
+					const dt = (now - Number(prev.ts)) / 1000;
+					if (dt > 0 && tx >= Number(prev.tx)) {
+						txBps = Math.round((tx - Number(prev.tx)) / dt);
+						rxBps = Math.round((rx - Number(prev.rx)) / dt);
+					}
+				}
+				await redis.hset(key, { peerAsn, tx, rx, ts: now, txBps, rxBps });
+				await redis.expire(key, 86400);
+			}
+		}
+	} catch {
+		/* redis optional */
+	}
+
 	console.log(
 		`[Agent ${nodeId}] Heartbeat: load=${status.loadAvg}, uptime=${status.uptime}s`,
 	);

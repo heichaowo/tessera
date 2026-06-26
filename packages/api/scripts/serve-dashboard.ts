@@ -49,6 +49,28 @@ const server = Bun.serve({
 			}
 		}
 
+		// Public demo controls (simulate a cheating agent / reset).
+		if (url.pathname.startsWith("/api/v1/demo/") && req.method === "POST") {
+			try {
+				const r = await fetch(`${CORE}${url.pathname}`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: await req.text(),
+				});
+				return new Response(await r.text(), {
+					headers: {
+						"content-type": "application/json",
+						"access-control-allow-origin": "*",
+					},
+				});
+			} catch {
+				return new Response(JSON.stringify({ error: "upstream unavailable" }), {
+					status: 502,
+					headers: { "content-type": "application/json" },
+				});
+			}
+		}
+
 		if (url.pathname === "/health") return new Response("ok");
 		return new Response("Not found", { status: 404 });
 	},

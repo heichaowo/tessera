@@ -9,6 +9,7 @@
 import { AgentBrain } from "./agent";
 import { NegotiationBroker } from "./broker";
 import config from "./config";
+import { settleAll } from "./settleUsage";
 import type { AgentIdentity } from "./types";
 
 function loadIdentities(): AgentIdentity[] {
@@ -41,6 +42,33 @@ console.log(
 
 const broker = new NegotiationBroker();
 const brains = identities.map((id) => new AgentBrain(id, broker));
-for (const b of brains) {
-	await b.tick();
+if (!config.settleOnly) {
+	for (const b of brains) {
+		await b.tick();
+	}
+}
+
+// M2b-3: keep the process alive and settle net usage on a recurring window.
+if (config.usageSettle.enabled) {
+	console.log(
+		`[brain] usage settlement loop on (every ${config.usageSettle.windowMs / 1000}s, dryRun=${config.dryRun})`,
+	);
+	const run = async () => {
+		try {
+			await settleAll(identities);
+		} catch (e) {
+			console.error("[settle] cycle error:", e);
+		}
+		if (config.negotiateDisplay) {
+			for (const b of brains) {
+				try {
+					await b.negotiateRound();
+				} catch (e) {
+					console.error("[negotiate] round error:", e);
+				}
+			}
+		}
+	};
+	await run();
+	setInterval(run, config.usageSettle.windowMs);
 }

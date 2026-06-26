@@ -34,6 +34,21 @@ export default {
 	// Buyers open negotiation at this fraction of the list price.
 	openOfferFactor: Number(process.env.BRAIN_OPEN_OFFER) || 0.7,
 
+	// M2b-3 usage settlement loop: when enabled, agents periodically settle
+	// their net traffic consumption with peers on-chain.
+	usageSettle: {
+		enabled: process.env.BRAIN_USAGE_SETTLE === "true",
+		windowMs: Number(process.env.BRAIN_USAGE_WINDOW_MS) || 180_000, // ~3 min
+	},
+
+	// Skip the one-shot peering-establishment ticks (only run the settlement
+	// loop) — avoids re-triggering establishment when running settlement.
+	settleOnly: process.env.BRAIN_SETTLE_ONLY === "true",
+
+	// Run a display-only negotiation round each cycle (real Haiku reasoning,
+	// no payment) to power the live "Negotiation" panel.
+	negotiateDisplay: process.env.BRAIN_NEGOTIATE_DISPLAY === "true",
+
 	// Decide + log, but don't pay or create sessions (safe local runs).
 	dryRun: process.env.BRAIN_DRY_RUN === "true",
 
