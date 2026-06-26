@@ -1,273 +1,98 @@
-# MoeNet Core
+# Tessera
 
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9%2B-blue.svg)](https://www.typescriptlang.org/)
-[![Bun](https://img.shields.io/badge/Bun-Latest-pink.svg)](https://bun.sh/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+**Autonomous, agent-to-agent BGP peering — negotiated, paid for, and settled on Arc.**
 
-Control Plane for the [MoeNet DN42](https://dn42.moenet.work) network. Provides a REST API for agent communication and a Telegram Bot for user interaction.
+> In antiquity, two parties would split a *tessera hospitalis* — a token of alliance — each keeping one half. Rejoin the halves and you proved the bond. Tessera's network agents do the same: one agent pays a *tessera* (USDC on Arc) to forge a verifiable peering bond with another network.
 
-## Table of Contents
+🌐 **Live network dashboard:** https://tessera.moenet.work — watch the agents discover, negotiate, pay, and form a network in real time
+🔗 **On-chain proof:** [batch settlement on Arc Testnet](https://testnet.arcscan.app/tx/0xae1a84226b44a48855cfa73c6522cffea739e61a8f091098b9064f66424ac9b7) · [Gateway Wallet](https://testnet.arcscan.app/address/0x0077777d7EBA4688BDeF3E311b846F25870A19B9)
+🏁 Built for **Lepton** (Canteen × Circle × Arc) — RFB 03: agent-to-agent nanopayment networks
 
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Bot Commands](#bot-commands)
-- [API Reference](#api-reference)
-- [Architecture](#architecture)
-- [BGP Communities](#bgp-communities)
-- [Development](#development)
-- [Documentation](#documentation)
-- [License](#license)
+---
 
-## Features
+## The problem
 
-- **Telegram Bot** - Complete peering management via [@moenet_dn42_bot](https://t.me/moenet_dn42_bot)
-- **Multi-auth** - GPG, SSH, or Email verification against DN42 registry
-- **Node Bootstrap** - One-command setup for new nodes
-- **Real-time Status** - WireGuard and BGP status via network tools
-- **Bilingual** - English and Chinese interface
-- **Rate Limiting** - Configurable per-endpoint rate limits
-- **Prometheus Metrics** - Full observability
+Network interconnection is stuck in the 1990s. Peering is negotiated by **email**, billed **monthly** on the **95th percentile**, priced by **bargaining power**, and "settlement-free" only if you're **big enough**. The reason is economic: real per-unit settlement was impossible — you couldn't bill a thousandth of a cent per route or per megabyte — so the industry settled for coarse proxies, big contracts, and an excluded long tail.
 
-## Quick Start
+Academic work agrees the status quo is unfair: 95th-percentile billing misaligns with real peak contribution and is gameable; the ~2:1 traffic-ratio gate for free peering is "often irrational"; paid-peering fees track power, not value.
 
-### Development
+## What Tessera does
 
-```bash
-# Install dependencies (requires Bun)
-bun install
+**Nanopayments remove the cost floor.** Tessera turns interconnection into a live market where **independent network agents act autonomously**:
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your values
+1. **Discover** — an agent queries the control plane for candidate peers + the inputs it needs (latency, region, capacity, price, the peer's wallet).
+2. **Decide** — Claude (Haiku) weighs latency / region / diversity / reputation under a **budget**, and explains its reasoning. *Money safety is enforced in code, not by the model: the LLM proposes value; the orchestrator enforces the hard budget cap and price band.*
+3. **Negotiate** — two-sided. The buyer opens below list; the provider's agent accepts / counters / rejects from its price band and its **reputation** of the requester. Repeat, well-behaved peers earn better prices.
+4. **Pay** — gasless USDC via the **x402 protocol + Circle Gateway nanopayments** (batched settlement on Arc).
+5. **Establish** — the control plane deterministically builds both sides of a **WireGuard link (link-local addressing)** and each node's agent brings up a real **eBGP** session. `birdc show protocols` reports it `Established`; real routes flow.
 
-# Start development server
-bun run dev
-```
+Run it and **four autonomous agents self-organize a full mesh of paid inter-AS peerings** — every link negotiated at its own price and settled on-chain.
 
-### Production (Docker)
+## Honesty (what's real, what's simulated)
 
-```bash
-# Clone and configure
-git clone https://github.com/moenet/moenet-core.git
-cd moenet-core
-cp .env.example .env
-vim .env
+Real public-internet BGP runs over physical / IX fabric with registered ASNs — **not** WireGuard tunnels. We don't operate a public-BGP carrier, so we use **DN42 + WireGuard as a testbed**, with testbed sub-ASNs, to *simulate* an autonomous paid-interconnection market.
 
-# Deploy
-docker compose up -d
-```
+**The mechanism is entirely real:** real agents, real two-sided LLM negotiation, real reputation, real **x402 settlement on Arc**, real **eBGP** sessions exchanging real routes between distinct ASNs. WireGuard here is simply the encrypted interconnect — which is exactly how modern overlay / encrypted-PNI peering already works.
 
-## Configuration
+## A fairer settlement model (where this goes)
 
-### Required Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Token from [@BotFather](https://t.me/botfather) |
-| `DB_PASSWORD` | PostgreSQL password |
-| `JWT_SECRET` | Secret for JWT tokens |
-| `WEBHOOK_DOMAIN` | Bot webhook domain |
-| `WEBHOOK_SECRET` | Webhook validation secret |
-
-### Optional Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TELEGRAM_ADMIN_USERNAME` | - | Admin username |
-| `TELEGRAM_ADMIN_CHAT_ID` | - | Admin notification chat |
-| `REDIS_URL` | (memory) | Redis for session persistence |
-| `LOCAL_ASN` | `4242420998` | Network ASN |
-| `MAILGUN_API_KEY` | - | Mailgun API key (enables email login) |
-| `MAILGUN_DOMAIN` | `dn42.moenet.work` | Mailgun sending domain |
-| `MAILGUN_FROM` | `DN42 Bot <bot@dn42.moenet.work>` | Email sender address |
-
-See `.env.example` for all options.
-
-## Bot Commands
-
-### User Commands
-
-| Command | Description |
-|---------|-------------|
-| `/start` | Show welcome message |
-| `/help` | List all commands |
-| `/login` | Authenticate with DN42 ASN (GPG / SSH / Email) |
-| `/peer` | Create new peering session |
-| `/info` | View your active peers |
-| `/modify` | Change peer settings |
-| `/remove` | Delete a peer |
-| `/status` | Check tunnel status |
-| `/restart` | Restart WireGuard tunnel |
-
-### Network Tools
-
-| Command | Description |
-|---------|-------------|
-| `/ping <target>` | Ping from nodes |
-| `/trace <target>` | Traceroute |
-| `/whois <query>` | DN42 WHOIS lookup |
-| `/dig <domain>` | DNS lookup |
-| `/route <prefix>` | BGP route lookup |
-
-### Admin Commands
-
-| Command | Description |
-|---------|-------------|
-| `/addnode` | Add new node (wizard) |
-| `/bootstrap <node>` | Generate setup script |
-| `/pending` | View pending approvals |
-| `/nodes` | List all nodes |
-
-## API Reference
-
-### Agent Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/agent/:router/sessions` | GET | Fetch BGP sessions |
-| `/agent/:router/bird-config` | GET | Fetch BIRD filters |
-| `/agent/:router/mesh` | GET | Fetch mesh peers |
-| `/agent/:router/config` | GET | Full bootstrap config |
-| `/agent/:router/heartbeat` | POST | Agent health report |
-| `/agent/:router/modify` | POST | Update session status |
-| `/agent/:router/report` | POST | Report metrics |
-
-### Public Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/auth` | POST | User authentication |
-| `/session` | POST | Peering management |
-| `/health` | GET | Health check |
-| `/metrics` | GET | Prometheus metrics |
-| `/bootstrap/:token` | GET | Bootstrap script |
-
-### Services
-
-| Service | Port | Domain |
-|---------|------|--------|
-| API | 3000 | api.moenet.work |
-| Bot | 3001 | bot.moenet.work |
-| Prometheus | 9090 | prom.moenet.work |
-| Grafana | 3002 | grafana.moenet.work |
+Because Gateway can net sub-cent flows and settle in batches, peering can be priced by **real metered usage** instead of coarse proxies:
+- **Establishment fee** — a one-time tessera to forge the peering (implemented).
+- **Continuous usage settlement** — meter real WireGuard tx/rx both ways and settle the **net** in real time. Balanced peering nets to ~free automatically; imbalanced pays the net provider in proportion to actual usage. Fairness becomes mechanical and transparent, and the long tail can finally peer (roadmap).
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                       Users (Telegram)                          │
-└─────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        Telegram Bot                              │
-│                   (grammY + Hono.js + Bun)                       │
-│  • Session Management (Redis)                                    │
-│  • Rate Limiting                                                 │
-│  • Peer Creation Wizard                                          │
-└─────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Control Plane API                           │
-│                      (Hono.js + Bun)                             │
-│  • Agent Authentication (JWT)                                    │
-│  • Session CRUD                                                  │
-│  • Bootstrap Token Management                                    │
-└─────────────────────────────────────────────────────────────────┘
-         │                        │                        │
-         ▼                        ▼                        ▼
-┌───────────────┐        ┌───────────────┐        ┌───────────────┐
-│  PostgreSQL   │        │     Redis     │        │    Agents     │
-│  (persistent) │        │   (session)   │        │   (Go nodes)  │
-└───────────────┘        └───────────────┘        └───────────────┘
+                    Control plane (moenet-core, Bun/Hono)
+        ┌──────────────────────────────────────────────────┐
+        │  x402 payment gate · peer discovery · session mgmt │
+        │  per-node WG/LLA link builder (nodePeering)        │
+        │  Postgres · Redis(RTT)                             │
+        │  meridian → Claude (Haiku)                          │
+        │  N× agent brains (own wallet / budget / reputation)│
+        └───────┬────────────────────────────────┬──────────┘
+        discover│ pay (x402)            config    │ heartbeat / RTT
+        ┌───────▼──────┐                    ┌──────▼───────┐
+        │  moenet-agent │◄── WireGuard ─────►│  moenet-agent │
+        │  (Go)  eBGP   │   (link-local)     │  (Go)  eBGP   │
+        └──────────────┘                    └──────────────┘
+              one autonomous network agent per node
 ```
 
-### Directory Structure
+The agent's payment SDK is TypeScript-only, so the **brain** (decision + negotiation + payment) is centralized in the control plane; the Go node daemon measures latency and brings up WireGuard + BIRD.
 
-```
-moenet-core/
-├── packages/
-│   ├── api/                    # Hono.js REST API
-│   │   └── src/
-│   │       ├── handlers/       # Request handlers
-│   │       ├── db/             # Sequelize models
-│   │       └── providers/      # WHOIS, Email (Mailgun), IP detection
-│   │
-│   └── bot/                    # grammY Telegram Bot
-│       └── src/
-│           ├── commands/       # Command handlers
-│           ├── middleware.ts   # Rate limiting
-│           └── i18n.ts         # Localization
-│
-├── docker-compose.yml          # Stack deployment
-└── .env.example                # Environment template
-```
+## What we built for Lepton (the delta)
 
-## BGP Communities
+This repo is our MoeNet DN42 control plane; the hackathon work is:
 
-### MoeNet Large Communities
+- **`packages/brain/`** — the autonomous agent (new): `decide/rules` (deterministic policy), `decide/llm` (Claude via meridian), `decide/negotiate` + `broker` (two-sided negotiation), `reputation` (file-backed memory), `pay` (x402 via `GatewayClient`), `agent` (discover→decide→negotiate→pay→peer loop).
+- **`packages/api/src/services/x402.ts`** — Circle Gateway payment gate (the seller side of x402).
+- **`packages/api/src/services/nodePeering.ts`** — deterministic WireGuard/LLA link builder + reciprocal session creation.
+- **`packages/api/src/handlers/peering.ts`** — paid peering, auto-approve, agent-negotiated price clamped into a band.
+- **`packages/api/src/handlers/agent.ts`** — the peer-discovery API (`GET /api/v1/agent/:node/peers`).
+- **`agent/`** (git submodule → `moenet-agent@feat/arc-x402`) — node daemon; hackathon change is per-node eBGP local-AS (`internal/task/bird_config_sync.go`, `internal/task/types.go`) so distinct ASNs peer.
 
-| Type | Format | Purpose |
-|------|--------|---------|
-| Accepted | `(4242420998, 100, <nodeId>)` | Ingress node |
-| Rejected | `(4242420998, 150, <reason>)` | Rejection reason |
-| Origin | `(4242420998, 3, <nodeId>)` | Cold potato routing |
+## Circle / Arc stack used
 
-### DN42 Standard Communities
+**x402 protocol** · **Circle Gateway nanopayments** (`@circle-fin/x402-batching`, gasless batched USDC) · **Arc Testnet** (chain `5042002`) · **USDC** (`0x3600…0000`).
 
-| Type | Range | Example |
-|------|-------|---------|
-| Latency | `(64511, 1-9)` | `(64511, 3)` = <20ms |
-| Bandwidth | `(64511, 21-25)` | `(64511, 21)` = ≥100Mbps |
-| Encryption | `(64511, 31-34)` | `(64511, 33)` = WireGuard |
-| Region | `(64511, 41-53)` | `(64511, 50)` = Asia-East |
+## Run the autonomous mesh
 
-## Development
-
-### Prerequisites
-
-- [Bun](https://bun.sh/) 1.0+
-- PostgreSQL 16
-- Redis (optional, for session persistence)
-
-### Commands
+Control plane (Postgres + Redis + Bun) and a Claude endpoint (we use [meridian](https://github.com/rynfar/meridian) to bridge a Claude subscription). Then:
 
 ```bash
-# Install dependencies
-bun install
+# control plane
+cd packages/api && bun install && bun run src/app.ts   # ARC_X402_ENABLED=true
 
-# Development mode
-bun run dev        # All packages
-bun run dev:api    # API only
-bun run dev:bot    # Bot only
-
-# Testing
-bun test
-
-# Linting
-bun run lint
-
-# Type checking
-bun run check
+# autonomous brains (one per node identity, with its wallet + budget + JWT)
+cd packages/brain
+BRAIN_IDENTITIES='[{"name":"lax","nodeName":"lax","privateKey":"0x..","jwt":"..","budgetUsd":0.05}, ...]' \
+  CORE_URL=http://127.0.0.1:3000 MERIDIAN_URL=http://127.0.0.1:3456 \
+  bun run src/index.ts
 ```
 
-### Build
-
-```bash
-bun run build
-# Output: packages/*/dist/
-```
-
-## Documentation
-
-- [Architecture](docs/ARCHITECTURE.md) - System design
-- [API Reference](docs/API.md) - Endpoint details
-- [Database Schema](docs/DATABASE.md) - Table definitions
-- [Bot Development](docs/BOT.md) - Adding commands
-- [Production](docs/PRODUCTION.md) - Deployment guide
+Each agent discovers peers, negotiates, pays on Arc, and the nodes bring up eBGP. See `packages/brain/scripts/demo-decide.ts` and `demo-negotiate.ts` for offline decision/negotiation demos (no servers needed).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+Inherits the MoeNet project license.

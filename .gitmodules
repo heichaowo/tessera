@@ -1,0 +1,4 @@
+[submodule "agent"]
+	path = agent
+	url = https://github.com/heichaowo/moenet-agent.git
+	branch = feat/arc-x402
