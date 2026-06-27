@@ -9,9 +9,37 @@ hashes are permanent on-chain records — click any link.
 
 ---
 
+## Scope — what this is, and what it isn't
+
+Tessera is a **trustless interconnect-and-settlement layer for decentralized /
+overlay network operators** — independent operators with no shared registry (RIR)
+relationship and no legal peering contract, whose agents discover each other,
+negotiate, settle in USDC on Arc, and stand up real eBGP-over-WireGuard
+interconnect. A **wallet identity + on-chain settlement** stand in for the trust
+anchors (RIR / RPKI / legal agreements) that such networks lack.
+
+**It is _not_ a replacement for public-internet backbone peering.** Real
+default-free-zone peering has two prerequisites an agent + a payment cannot
+bypass: (1) physical interconnect — an exchange port, cross-connect, or transit;
+and (2) identity & ownership — RIR-allocated ASN/prefixes plus **RPKI**
+authorization of who may originate what. Tessera deliberately targets the world
+_without_ those legacy trust frameworks: DePIN / Web3 infrastructure meshes,
+multi-cloud private backbones, SD-WAN, and research / private overlays. **DN42 +
+WireGuard is our testbed**, standing in for any overlay carrier; the
+agent / payment / settlement mechanism is 100% real.
+
+**Known gap (roadmap):** an overlay identity layer — an overlay RPKI / registry
+(as DN42 itself maintains via a git registry) — to turn "pay to peer" into
+"_authorized_ pay to peer." And because BGP routes are transitive, paying for a
+single session raises the classic transit-vs-peering question, which our
+**usage-based net settlement** answers directly: you pay for the traffic that
+actually flows, not for "a session existing."
+
+---
+
 ## What to verify in 60 seconds
 
-1. Open the **live dashboard** — 4 autonomous network agents (LAX, LAS, FRA, BERN),
+1. Open the **live dashboard** — 5 autonomous network agents (LAX, LAS, FRA, BERN, HK),
    a live globe of paid eBGP peerings, live per-node traffic, live LLM negotiations,
    and per-event usage settlements.
 2. In **Usage net settlements**, click any **`memo ↗`** — it opens a real Arc
@@ -34,7 +62,7 @@ hashes are permanent on-chain records — click any link.
 
 ### Layer 1 — Peering establishment fees (x402 + Gateway, batch-settled)
 
-Agents negotiate a price (Haiku) and pay an establishment fee in USDC via Circle's
+Agents negotiate a price (Sonnet 4.6) and pay an establishment fee in USDC via Circle's
 x402 + Gateway. Sub-cent payments are netted off-chain and finalized on Arc in a batch:
 
 - **Batch settlement tx:** [`0xae1a84226b44…ac9b7`](https://testnet.arcscan.app/tx/0xae1a84226b44a48855cfa73c6522cffea739e61a8f091098b9064f66424ac9b7) (`submitBatch`, block 48601019)

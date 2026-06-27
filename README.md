@@ -21,24 +21,28 @@ Academic work agrees the status quo is unfair: 95th-percentile billing misaligns
 **Nanopayments remove the cost floor.** Tessera turns interconnection into a live market where **independent network agents act autonomously**:
 
 1. **Discover** — an agent queries the control plane for candidate peers + the inputs it needs (latency, region, capacity, price, the peer's wallet).
-2. **Decide** — Claude (Haiku) weighs latency / region / diversity / reputation under a **budget**, and explains its reasoning. *Money safety is enforced in code, not by the model: the LLM proposes value; the orchestrator enforces the hard budget cap and price band.*
+2. **Decide** — Claude (Sonnet 4.6) weighs latency / region / diversity / reputation under a **budget**, and explains its reasoning. *Money safety is enforced in code, not by the model: the LLM proposes value; the orchestrator enforces the hard budget cap and price band.*
 3. **Negotiate** — two-sided. The buyer opens below list; the provider's agent accepts / counters / rejects from its price band and its **reputation** of the requester. Repeat, well-behaved peers earn better prices.
 4. **Pay** — gasless USDC via the **x402 protocol + Circle Gateway nanopayments** (batched settlement on Arc).
 5. **Establish** — the control plane deterministically builds both sides of a **WireGuard link (link-local addressing)** and each node's agent brings up a real **eBGP** session. `birdc show protocols` reports it `Established`; real routes flow.
 
-Run it and **four autonomous agents self-organize a full mesh of paid inter-AS peerings** — every link negotiated at its own price and settled on-chain.
+Run it and **five autonomous agents self-organize a full mesh of paid inter-AS peerings** — every link negotiated at its own price and settled on-chain.
 
-## Honesty (what's real, what's simulated)
+## Scope & honesty (what this is, what it isn't)
 
-Real public-internet BGP runs over physical / IX fabric with registered ASNs — **not** WireGuard tunnels. We don't operate a public-BGP carrier, so we use **DN42 + WireGuard as a testbed**, with testbed sub-ASNs, to *simulate* an autonomous paid-interconnection market.
+**Tessera is an interconnect-and-settlement layer for decentralized / overlay network operators** — independent operators with no shared registry (RIR) relationship and no legal peering contract. For them a **wallet identity + on-chain settlement** replace the trust anchors (RIR / RPKI / legal agreements) the public internet relies on.
 
-**The mechanism is entirely real:** real agents, real two-sided LLM negotiation, real reputation, real **x402 settlement on Arc**, real **eBGP** sessions exchanging real routes between distinct ASNs. WireGuard here is simply the encrypted interconnect — which is exactly how modern overlay / encrypted-PNI peering already works.
+**This is _not_ a drop-in replacement for public-internet backbone peering.** Real default-free-zone peering has two prerequisites an agent + a payment cannot bypass: (1) **physical interconnect** — an exchange port, cross-connect, or transit; and (2) **identity & ownership** — RIR-allocated ASN/prefixes plus **RPKI** authorization of who may originate which routes (the one piece of real cryptographic trust in today's BGP). Tessera deliberately targets the world _without_ those legacy frameworks: DePIN / Web3 infrastructure meshes, multi-cloud private backbones, SD-WAN, and research / private overlays — exactly where automated, trustless interconnect + nanopayment settlement is missing today.
+
+We don't operate a public-BGP carrier, so we use **DN42 + WireGuard as the testbed**, with testbed sub-ASNs, standing in for any overlay carrier. **The mechanism is entirely real:** real agents, real two-sided LLM negotiation, real reputation, real **x402 settlement on Arc**, and real **eBGP** sessions exchanging real routes between distinct ASNs. WireGuard here is simply the encrypted interconnect — exactly how modern overlay / encrypted-PNI peering already works.
+
+**Known gap (roadmap): the identity layer.** A production overlay version needs an overlay RPKI / registry (as DN42 itself maintains via a git registry) to turn "pay to peer" into "_authorized_ pay to peer." And because BGP routes are transitive, our **usage-based net settlement** is also the answer to the classic transit-vs-peering question — you pay for the traffic that actually flows, not for a session merely existing.
 
 ## A fairer settlement model (where this goes)
 
 Because Gateway can net sub-cent flows and settle in batches, peering can be priced by **real metered usage** instead of coarse proxies:
 - **Establishment fee** — a one-time tessera to forge the peering (implemented).
-- **Continuous usage settlement** — meter real WireGuard tx/rx both ways and settle the **net** in real time. Balanced peering nets to ~free automatically; imbalanced pays the net provider in proportion to actual usage. Fairness becomes mechanical and transparent, and the long tail can finally peer (roadmap).
+- **Continuous usage settlement** — meter real WireGuard tx/rx both ways and settle the **net** in real time, with bilateral cross-attestation so neither side can over-bill. Balanced peering nets to ~free automatically; imbalanced pays the net provider in proportion to actual usage. Fairness becomes mechanical and transparent, and the long tail can finally peer (implemented — M2b-3).
 
 ## Architecture
 
