@@ -38,6 +38,12 @@ We don't operate a public-BGP carrier, so we use **DN42 + WireGuard as the testb
 
 **Known gap (roadmap): the identity layer.** A production overlay version needs an overlay RPKI / registry (as DN42 itself maintains via a git registry) to turn "pay to peer" into "_authorized_ pay to peer." And because BGP routes are transitive, our **usage-based net settlement** is also the answer to the classic transit-vs-peering question — you pay for the traffic that actually flows, not for a session merely existing.
 
+## Substrate-agnostic by design
+
+Tessera's value — autonomous discovery, two-sided negotiation, reputation, and nanopayment settlement — lives **above the forwarding layer**, so it isn't wedded to TCP/IP. It rides BGP + WireGuard today only because IP is the universal overlay base; the same agent / negotiation / settlement loop ports to a different routing substrate (e.g. **SCION**'s path-aware secure inter-domain routing, or name-based forwarding) by swapping just the thin "bring up a link + meter it" adapter.
+
+This matters because the parts of networking abandoning TCP/IP — **InfiniBand, NVLink, RoCE, CXL** — are *intra-datacenter* fabrics (single operator, lossless, RDMA): a fundamentally different problem from cross-operator, wide-area interconnect, and they do no inter-domain routing at all. A future of heterogeneous fabrics and post-IP inter-domain efforts only *raises* the need for a **neutral, cross-boundary economic settlement layer** — exactly the layer Tessera occupies.
+
 ## A fairer settlement model (where this goes)
 
 Because Gateway can net sub-cent flows and settle in batches, peering can be priced by **real metered usage** instead of coarse proxies:
