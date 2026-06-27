@@ -9,7 +9,7 @@ export default {
 	meridian: {
 		url: process.env.MERIDIAN_URL || "http://127.0.0.1:3456",
 		apiKey: process.env.MERIDIAN_API_KEY || "x", // placeholder unless meridian auth is on
-		model: process.env.BRAIN_MODEL || "claude-haiku-4-5-20251001",
+		model: process.env.BRAIN_MODEL || "claude-sonnet-4-6",
 		// Default on; set BRAIN_LLM_ENABLED=false to force deterministic rules.
 		enabled: process.env.BRAIN_LLM_ENABLED !== "false",
 	},

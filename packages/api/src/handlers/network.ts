@@ -131,6 +131,19 @@ export default async function networkHandler(c: Context): Promise<Response> {
 		(r) => Array.isArray(r.flags) && r.flags.length > 0,
 	).length;
 
+	// Prefer monotonic cumulative totals (the rolling-window sum plateaus once
+	// the list is capped, so the displayed total stops moving).
+	let usageCount = usageSettlements.length;
+	try {
+		const redis = getRedis();
+		const tot = await redis.get("usage_settled_total");
+		if (tot != null) usageSettledUsd = Number(tot);
+		const cnt = await redis.get("usage_settled_count");
+		if (cnt != null) usageCount = Number(cnt);
+	} catch {
+		/* redis optional */
+	}
+
 	// Recent agent-to-agent negotiations (offer/counter/accept + reasoning).
 	let negotiations: Array<Record<string, unknown>> = [];
 	try {
@@ -169,7 +182,7 @@ export default async function networkHandler(c: Context): Promise<Response> {
 			establishedPairs: Math.floor(establishedRows / 2),
 			totalSettlements: peerings.filter((p) => p.settlement).length,
 			totalPaidUsd: Number(totalPaid.toFixed(6)),
-			usageSettlementCount: usageSettlements.length,
+			usageSettlementCount: usageCount,
 			usageSettledUsd: Number(usageSettledUsd.toFixed(6)),
 			usageCrossAttested,
 			usageFlagged,

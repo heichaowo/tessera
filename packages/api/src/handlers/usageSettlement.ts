@@ -337,6 +337,9 @@ export default async function usageSettlementHandler(
 	};
 	await redis.lpush("usage_settlements", JSON.stringify(record));
 	await redis.ltrim("usage_settlements", 0, 199);
+	// monotonic cumulative totals (the rolling list sum plateaus once capped)
+	await redis.incrbyfloat("usage_settled_total", amountUsd);
+	await redis.incr("usage_settled_count");
 	if (flags.length) {
 		await redis.lpush(
 			"usage_flags",

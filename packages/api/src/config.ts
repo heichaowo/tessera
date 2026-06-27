@@ -110,7 +110,9 @@ export default {
 		// M2b-3 usage-based net settlement: price per GB of net traffic
 		// imbalance; the net receiver pays the net sender each window.
 		usagePricePerGbUsd: Number(process.env.ARC_USAGE_PRICE_PER_GB) || 0.1,
-		// Don't bother settling below this dollar amount (avoids dust txns).
+		// Settle frequently so the cumulative total visibly grows; only skip
+		// truly dust nets (near-zero ones can fail Gateway as formattedAmount 0,
+		// but that's graceful log noise).
 		usageMinSettleUsd: Number(process.env.ARC_USAGE_MIN_SETTLE) || 0.0001,
 		// Bilateral cross-attestation: a direction's sender-tx vs receiver-rx may
 		// differ by packet loss + sampling skew. Flag a discrepancy only when the

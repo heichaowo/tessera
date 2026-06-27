@@ -177,6 +177,17 @@ rm -rf /etc/bird/peers/* /etc/bird/ibgp.d/* 2>/dev/null || true
 mkdir -p /etc/bird/peers /etc/bird/ibgp.d /var/run/bird/run
 chown -R bird:bird /etc/bird /var/run/bird
 
+# BIRD's control socket lives under /run/bird/run (= /var/run/bird/run), but /run
+# is tmpfs and is wiped on every reboot. Without this, after a reboot bird fails
+# with "Cannot create control socket ... No such file or directory" and, because
+# moenet-agent has Requires=bird.service, the agent is dragged down too (node
+# silently goes offline). A tmpfiles.d rule recreates the dir early on every boot.
+cat > /etc/tmpfiles.d/bird-run.conf << 'TMPFILES_EOF'
+d /run/bird 0755 root root -
+d /run/bird/run 0755 root root -
+TMPFILES_EOF
+systemd-tmpfiles --create /etc/tmpfiles.d/bird-run.conf 2>/dev/null || true
+
 # Stop existing services to avoid "Text file busy" error
 systemctl stop bird 2>/dev/null || true
 systemctl stop moenet-agent 2>/dev/null || true
