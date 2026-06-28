@@ -95,6 +95,7 @@ wallet to see its real USDC `deposit` / settlement activity on Arc:
 | LAS | AS4242421002 | [`0xEC3F…6e5C`](https://testnet.arcscan.app/address/0xEC3FC32431AA97d28897B571731975BdAEF56e5C) |
 | FRA | AS4242421003 | [`0xfD83…e42A`](https://testnet.arcscan.app/address/0xfD8389b123E2c29A7C126b94B82a2c5a6660e42A) |
 | BERN | AS4242421004 | [`0xC6e7…eaA7`](https://testnet.arcscan.app/address/0xC6e770f3f9E6C2c5aa7E53e8caeD86016759eaA7) |
+| HK *(large-provider node)* | AS4242421005 | [`0x40D9…eFF6`](https://testnet.arcscan.app/address/0x40D90B72Feb467C8bb98Cdf5D84720d15e7aeFF6) |
 
 Funder (distributed test USDC to the agents): [`0xe1A5…Ca809`](https://testnet.arcscan.app/address/0xe1A50f55373F97421c4eC39B82d0d6cd502Ca809)
 
@@ -103,7 +104,8 @@ Funder (distributed test USDC to the agents): [`0xe1A5…Ca809`](https://testnet
 ## Real data plane (not a simulation of BGP)
 
 The agents establish **real eBGP-over-WireGuard** sessions between distinct ASNs —
-a full 4-node, 6-pair mesh. On any node:
+a full 5-node, 7-pair mesh (LAX · LAS · FRA · BERN, plus the HK large-provider
+node peering LAX across the Pacific). On any node:
 
 ```
 birdc show protocols | grep dn42_
@@ -134,7 +136,7 @@ sub-cent, and tamper-evident.
 
 Real public BGP runs over physical/IX links with registered ASNs and **no WireGuard
 tunnel**. We have no public-BGP carrier, so we use a **DN42 + WireGuard testbed**
-with testbed sub-ASNs (4242421001–04) to model independent operators. **The mechanism
+with testbed sub-ASNs (4242421001–05) to model independent operators. **The mechanism
 is 100% real**: autonomous discovery → multi-factor decision → two-sided LLM
 negotiation → x402 on-chain payment → real eBGP peering → metered usage settlement.
 In production the same logic meters the real data-plane interface (physical port /
