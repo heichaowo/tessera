@@ -7,6 +7,11 @@ import flapHandler from "./handlers/flap";
 import metricsHandler from "./handlers/metrics";
 import networkHandler from "./handlers/network";
 import peeringHandler from "./handlers/peering";
+import {
+	demoSlaBreachHandler,
+	slaPaidHandler,
+	slaPendingHandler,
+} from "./handlers/sla";
 import usageSettlementHandler, {
 	demoCheatHandler,
 	demoResetHandler,
@@ -55,4 +60,9 @@ export function registerRoutes(app: Hono) {
 	// Public, auto-reverting demo control (simulate a cheating agent)
 	app.post("/api/v1/demo/cheat", demoCheatHandler);
 	app.post("/api/v1/demo/reset", demoResetHandler);
+
+	// Route A — provider SLA + automatic nano-compensation
+	app.get("/api/v1/sla/pending", slaPendingHandler);
+	app.post("/api/v1/sla/paid", slaPaidHandler);
+	app.post("/api/v1/demo/sla-breach", demoSlaBreachHandler);
 }

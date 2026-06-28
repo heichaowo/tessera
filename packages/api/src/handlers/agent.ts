@@ -14,6 +14,7 @@ import {
 	computeLoopbackIPv6,
 	deriveLLAFromLoopback,
 } from "../services/ipAllocator";
+import { accrueSlaBreach } from "./sla";
 
 /**
  * Map regionCode to continent and subregion LC constants
@@ -370,6 +371,22 @@ async function handleModify(c: Context, router: string): Promise<Response> {
 		return success(c, { deleted: true });
 	}
 
+	// Capture prior state so an SLA breach is accrued only on the transition
+	// into PROBLEM (not on every repeated report while a session stays down).
+	let prevStatus: PeeringStatus | undefined;
+	let sessionAsn: number | undefined;
+	try {
+		const existing = await models.bgpSessions.findOne({
+			where: { uuid, router },
+		});
+		if (existing) {
+			prevStatus = existing.get("status") as PeeringStatus;
+			sessionAsn = Number(existing.get("asn"));
+		}
+	} catch {
+		/* best-effort */
+	}
+
 	const [updated] = await models.bgpSessions.update(
 		{
 			status: status as PeeringStatus,
@@ -385,6 +402,21 @@ async function handleModify(c: Context, router: string): Promise<Response> {
 			undefined,
 			"Session not found",
 		);
+	}
+
+	// Route A: a peering to the SLA provider (HK) dropping to PROBLEM is a
+	// breach → accrue a USDC credit owed by HK to this customer (router).
+	if (
+		status === PeeringStatus.PROBLEM &&
+		prevStatus !== PeeringStatus.PROBLEM &&
+		sessionAsn === config.arc.slaProviderAsn
+	) {
+		try {
+			await accrueSlaBreach(router, "BGP session to HK dropped (PROBLEM)");
+			console.log(`[sla] breach accrued: ${router} <-> HK`);
+		} catch (e) {
+			console.error("[sla] accrue failed:", e);
+		}
 	}
 
 	return success(c, { updated: true });

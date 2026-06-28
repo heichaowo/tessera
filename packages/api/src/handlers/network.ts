@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { getModels } from "../db/dbContext";
 import { PeeringStatus } from "../db/models/bgpSessions";
 import { getRedis } from "../db/redisContext";
+import { slaSummary } from "./sla";
 
 /**
  * Public, read-only network state for the live dashboard (tessera.moenet.work).
@@ -172,6 +173,14 @@ export default async function networkHandler(c: Context): Promise<Response> {
 		/* redis optional */
 	}
 
+	// Route A — provider SLA + auto-compensation summary.
+	let sla: Record<string, unknown> | null = null;
+	try {
+		sla = await slaSummary();
+	} catch {
+		/* redis optional */
+	}
+
 	return c.json({
 		updatedAt: new Date(now).toISOString(),
 		stats: {
@@ -195,5 +204,6 @@ export default async function networkHandler(c: Context): Promise<Response> {
 		usageSettlements,
 		negotiations,
 		demoCheat,
+		sla,
 	});
 }

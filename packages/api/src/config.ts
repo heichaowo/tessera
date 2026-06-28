@@ -125,5 +125,12 @@ export default {
 		// an active direction can differ by ~rate*5s (~1-5MB) with no loss/cheat.
 		usageDiscrepancyMinBytes:
 			Number(process.env.ARC_USAGE_DISCREPANCY_MIN_BYTES) || 5_000_000,
+		// Route A — provider SLA + automatic nano-compensation. The large
+		// provider (HK, AS4242421005) commits an availability SLA to each
+		// customer; on a breach (the peering to it drops / flaps) the customer
+		// is credited slaCreditUsd in USDC, paid and memo'd on-chain by the
+		// provider's own agent — no claims process, no human in the loop.
+		slaProviderAsn: Number(process.env.ARC_SLA_PROVIDER_ASN) || 4242421005,
+		slaCreditUsd: Number(process.env.ARC_SLA_CREDIT) || 0.002,
 	},
 };

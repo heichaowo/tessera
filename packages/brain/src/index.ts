@@ -9,6 +9,7 @@
 import { AgentBrain } from "./agent";
 import { NegotiationBroker } from "./broker";
 import config from "./config";
+import { settleSla } from "./settleSla";
 import { settleAll } from "./settleUsage";
 import type { AgentIdentity } from "./types";
 
@@ -54,6 +55,15 @@ if (config.usageSettle.enabled) {
 		`[brain] usage settlement loop on (every ${config.usageSettle.windowMs / 1000}s, dryRun=${config.dryRun})`,
 	);
 	const run = async () => {
+		// Route A first: pay out SLA breach credits promptly, before the (slower)
+		// usage-settlement sweep, so a breach is auto-refunded within a cycle.
+		for (const id of identities) {
+			try {
+				await settleSla(id);
+			} catch (e) {
+				console.error("[sla] cycle error:", e);
+			}
+		}
 		try {
 			await settleAll(identities);
 		} catch (e) {

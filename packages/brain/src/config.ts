@@ -49,6 +49,10 @@ export default {
 	// no payment) to power the live "Negotiation" panel.
 	negotiateDisplay: process.env.BRAIN_NEGOTIATE_DISPLAY === "true",
 
+	// Route A: the node that acts as the large SLA provider. Only this identity's
+	// brain pays out SLA breach credits (settleSla is a no-op for the others).
+	slaProviderNode: process.env.BRAIN_SLA_PROVIDER || "hk",
+
 	// Decide + log, but don't pay or create sessions (safe local runs).
 	dryRun: process.env.BRAIN_DRY_RUN === "true",
 
