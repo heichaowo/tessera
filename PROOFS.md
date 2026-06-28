@@ -80,6 +80,8 @@ the Arc Memo contract. Sample memo transactions (open them — the input decodes
 | fra → las | [`0x6ffedac1…8951`](https://testnet.arcscan.app/tx/0x6ffedac17d1bcaa90604e3acb85d8a6cd139d2cfe603818137233cd9c0978951) |
 | fra → bern | [`0x5641c5ae…51c8`](https://testnet.arcscan.app/tx/0x5641c5ae38d550eeab8f681757040c21f6a6143bc022792029d59fb5062351c8) |
 | bern → lax | [`0x9d5f31b0…abdb`](https://testnet.arcscan.app/tx/0x9d5f31b094abd1182adb85a2375e6471ffef0e77aadac0f110002754eae1abdb) |
+| hk → las | [`0x75da623b…3100`](https://testnet.arcscan.app/tx/0x75da623b1f29557cf19d8d3f42016bb9bffdb75b45fc3ce2f1b79f41876b3100) |
+| hk → fra | [`0xfccff5cd…2655`](https://testnet.arcscan.app/tx/0xfccff5cd4b77329c624ebe6719af2cc2f845e5dede7fce72f24d5e6300202655) |
 
 > The live dashboard's **On-chain ↗** column links the current settlements' memos.
 > The hashes above are permanent regardless of what's currently on screen.
