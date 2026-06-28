@@ -202,6 +202,11 @@
     <div id="usage"><div class="empty">No usage settlements yet — agents settle net traffic each window.</div></div>
   </div>
 
+  <div class="panel">
+    <h3><button class="dbtn" id="slaBtn" onclick="simulateSlaBreach()">▶ Simulate SLA breach</button>HK provider SLA + auto-compensation <span class="sub2" id="slaSub">· large provider commits availability · breach → automatic USDC nano-credit, paid + memo'd on-chain by HK · no claims process</span></h3>
+    <div id="sla"><div class="empty">No SLA breaches — HK is meeting its commitment.</div></div>
+  </div>
+
   <div class="foot" id="foot"></div>
 </div>
 
@@ -244,6 +249,13 @@ async function resetDemo(){
   b.disabled=true; b.textContent="↻ resetting…";
   try{ await fetch("/api/v1/demo/reset",{method:"POST"}); }catch(e){}
   setTimeout(()=>{ b.disabled=false; b.textContent="↻ reset"; tick(); }, 2000);
+  tick();
+}
+async function simulateSlaBreach(){
+  const b=document.getElementById("slaBtn");
+  b.disabled=true; b.textContent="▶ injecting breach…";
+  try{ await fetch("/api/v1/demo/sla-breach",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}); }catch(e){}
+  setTimeout(()=>{ b.disabled=false; b.textContent="▶ Simulate SLA breach"; tick(); }, 3000);
   tick();
 }
 const pairKey=(a,b)=>[a,b].sort().join("~");
@@ -445,6 +457,25 @@ async function tick(){
   if(d.demoCheat){ cb.style.display="block";
     cb.innerHTML=`⚠ <b>DEMO:</b> simulating a cheating agent — <b>${d.demoCheat.node}</b> is over-reporting its sent traffic ×3. Watch bilateral cross-attestation flag it below; billing stays on the conservative value, so funds are safe. Auto-reverts in <b>${d.demoCheat.ttl}s</b>.`;
   } else cb.style.display="none";
+
+  // Route A: HK provider SLA + automatic nano-compensation
+  const sla=d.sla;
+  if(sla){
+    const subEl=document.getElementById("slaSub");
+    if(subEl) subEl.innerHTML=
+      `· HK commits availability · breach → auto <b>$${sla.creditUsd}</b> USDC credit, paid + memo'd on-chain by HK · `+
+      `<b>${sla.creditedCount||0}</b> credits paid · <b>$${(sla.creditedUsd||0).toFixed(6)}</b> refunded`+
+      (sla.pending?` · <span class="bad">${sla.pending} settling…</span>`:``);
+    const rows=sla.recent||[];
+    document.getElementById("sla").innerHTML = rows.length
+      ? rows.map(r=>{
+          const st=r.paid
+            ? (r.memoTx?`<span class="ok">auto-refunded ✓</span> <a href="${EXPLORER}/tx/${r.memoTx}" target="_blank">memo↗</a>`:`<span class="ok">auto-refunded ✓</span>`)
+            : `<span class="bad">breach detected · HK auto-refund pending…</span>`;
+          return `<div>⚠ <b>${r.customer}</b> ← HK · ${r.reason||"breach"} · credit <b>+$${r.amountUsd}</b> · ${st}</div>`;
+        }).join("")
+      : `<div class="empty">No SLA breaches — HK is meeting its commitment.</div>`;
+  }
 
   const tk=d.peerings.filter(p=>p.settlement).slice(0,12).map(p=>`<span>${p.peerName?("→ "+p.peerName):""} <b>+${fmt(p.priceUsd)}</b></span>`).join("")
     ||"<span>no settlements yet — run an autonomous round</span>";

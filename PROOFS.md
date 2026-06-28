@@ -86,6 +86,22 @@ the Arc Memo contract. Sample memo transactions (open them — the input decodes
 > The live dashboard's **On-chain ↗** column links the current settlements' memos.
 > The hashes above are permanent regardless of what's currently on screen.
 
+### Layer 3 — provider SLA + automatic nano-compensation (Route A)
+
+HK is a large provider that every other agent peers and pays to connect to
+(establishment fees above). In return HK commits an **availability SLA**: if a
+customer's peering to HK breaches (its BGP session drops to PROBLEM, or the
+dashboard's **Simulate SLA breach** button fires), the control plane accrues a
+credit and **HK's own agent automatically refunds** the customer in USDC and
+writes an on-chain Memo — no claim, no dispute, no human in the loop.
+
+Sample auto-refund (HK → FRA, $0.002), both txs from HK's wallet:
+
+| Step | Transaction |
+|---|---|
+| USDC credit (HK → FRA, 0.002) | [`0xb634aa1c…1eb6`](https://testnet.arcscan.app/tx/0xb634aa1cf1a1b0a6dd4f951620f993a1e456bc57818f06f12fb61a4f97e21eb6) |
+| On-chain SLA memo | [`0xde1b25e7…3153`](https://testnet.arcscan.app/tx/0xde1b25e7fb00ee3c64398c5ca6a8aeb001c21192bd45928f44df45d8a51b3153) |
+
 ### Autonomous agents — wallets & ASNs
 
 Each node is an independent agent with its own EOA wallet and testbed ASN. Click a
