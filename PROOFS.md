@@ -104,8 +104,12 @@ Funder (distributed test USDC to the agents): [`0xe1A5…Ca809`](https://testnet
 ## Real data plane (not a simulation of BGP)
 
 The agents establish **real eBGP-over-WireGuard** sessions between distinct ASNs —
-a full 5-node, 7-pair mesh (LAX · LAS · FRA · BERN, plus the HK large-provider
-node peering LAX across the Pacific). On any node:
+a full **5-node, 10-pair mesh** (20/20 directional BGP sessions up). HK is the
+**large-provider hub**: all four other agents independently discovered it,
+negotiated (Sonnet 4.6), and each **paid HK an establishment fee** to peer it —
+*others connect to the large provider, not the reverse* — including HK↔LAX across
+the Pacific. Those four inbound establishment fees are visible on HK's wallet
+(see table above). On any node:
 
 ```
 birdc show protocols | grep dn42_
