@@ -4,6 +4,7 @@ import config from "../config";
 import { getModels } from "../db/dbContext";
 import { getRedis } from "../db/redisContext";
 import { requireGatewayPayment } from "../services/x402";
+import { isPoor } from "./demoInsolvency";
 
 function authed(c: Context): boolean {
 	const token = c.req.header("Authorization")?.split("Bearer ")[1];
@@ -168,6 +169,17 @@ export default async function usageSettlementHandler(
 	}
 	const self = await models.routers.findOne({ where: { name: node } });
 	const nodeAsn = self ? Number(self.get("asn")) : 0;
+
+	// Edge case (Route B): an insolvent node can't settle — reject the payment.
+	// The peering stays up but the settlement defaults; the default + standing
+	// hit are recorded by the demo trigger and shown on the dashboard.
+	if (await isPoor(node)) {
+		return c.json({
+			settled: false,
+			default: true,
+			reason: "insufficient balance — payment default",
+		});
+	}
 
 	// Traffic is live, so the net changes between the 402 challenge and the
 	// signed retry. We FREEZE the challenged amount + both sides' cumulative

@@ -269,6 +269,11 @@
     <div id="sla"><div class="empty">No SLA breaches — HK is meeting its commitment.</div></div>
   </div>
 
+  <div class="panel">
+    <h3><button class="dbtn" id="poorBtn" onclick="simulateInsolvent()">▶ Simulate insufficient balance</button>Payment integrity <span class="sub2">· an agent that can't pay defaults · settlement is rejected, the peering is flagged at-risk, and the defaulter's standing drops — non-payment has a cost</span></h3>
+    <div id="payments"><div class="empty">All agents solvent — settlements are clearing.</div></div>
+  </div>
+
   <div class="foot" id="foot"></div>
 </div>
 
@@ -340,6 +345,13 @@ async function rerunMesh(){
     if(r&&r.busy) b.textContent=`⟳ rebuilding… (${r.ttl}s)`;
   }catch(e){}
   setTimeout(tick, 1500);
+}
+async function simulateInsolvent(){
+  const b=document.getElementById("poorBtn");
+  b.disabled=true; b.textContent="▶ defaulting…";
+  try{ await fetch("/api/v1/demo/insolvent",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}); }catch(e){}
+  setTimeout(()=>{ b.disabled=false; b.textContent="▶ Simulate insufficient balance"; tick(); }, 3000);
+  tick();
 }
 const pairKey=(a,b)=>[a,b].sort().join("~");
 
@@ -568,6 +580,19 @@ async function tick(){
           return `<div>⚠ <b>${r.customer}</b> ← HK · ${r.reason||"breach"} · credit <b>+$${r.amountUsd}</b> · ${st}</div>`;
         }).join("")
       : `<div class="empty">No SLA breaches — HK is meeting its commitment.</div>`;
+  }
+
+  // Route B: payment integrity (insolvency / defaults)
+  const pay=d.payments, payEl=document.getElementById("payments");
+  if(pay&&payEl){
+    const dr=pay.defaults||[];
+    payEl.innerHTML = dr.length
+      ? dr.slice(0,8).map(r=>{
+          const cnt=(pay.counts&&pay.counts[r.node])||1;
+          const live=(pay.poor||[]).includes(r.node)?` <span class="bad">· insolvent now</span>`:``;
+          return `<div>⚠ <b>${r.node}</b> · ${r.reason||"payment default"} · <span class="bad">settlement rejected — peering at-risk</span> <span style="color:var(--dim)">· standing ↓ (${cnt} default${cnt>1?'s':''})</span>${live}</div>`;
+        }).join("")
+      : `<div class="empty">All agents solvent — settlements are clearing.</div>`;
   }
 
   const tk=d.peerings.filter(p=>p.settlement).slice(0,12).map(p=>`<span>${p.peerName?("→ "+p.peerName):""} <b>+${fmt(p.priceUsd)}</b></span>`).join("")

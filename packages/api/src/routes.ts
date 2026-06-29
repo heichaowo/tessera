@@ -7,6 +7,7 @@ import flapHandler from "./handlers/flap";
 import metricsHandler from "./handlers/metrics";
 import networkHandler from "./handlers/network";
 import peeringHandler from "./handlers/peering";
+import { demoInsolventHandler } from "./handlers/demoInsolvency";
 import {
 	demoRerunClaimHandler,
 	demoRerunHandler,
@@ -73,4 +74,7 @@ export function registerRoutes(app: Hono) {
 	// One-click "reset & rerun from zero" (public, cooldown-locked) + brain claim
 	app.post("/api/v1/demo/rerun", demoRerunHandler);
 	app.post("/api/v1/demo/rerun-claim", demoRerunClaimHandler);
+
+	// Edge case (Route B): simulate insolvency → payment default
+	app.post("/api/v1/demo/insolvent", demoInsolventHandler);
 }

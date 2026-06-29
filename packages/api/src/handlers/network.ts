@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { getModels } from "../db/dbContext";
 import { PeeringStatus } from "../db/models/bgpSessions";
 import { getRedis } from "../db/redisContext";
+import { insolvencySummary } from "./demoInsolvency";
 import { rerunStatus } from "./demoRerun";
 import { slaSummary } from "./sla";
 
@@ -190,6 +191,14 @@ export default async function networkHandler(c: Context): Promise<Response> {
 		/* redis optional */
 	}
 
+	// Route B — payment-integrity (insolvency / defaults) summary.
+	let payments: Record<string, unknown> | null = null;
+	try {
+		payments = await insolvencySummary();
+	} catch {
+		/* redis optional */
+	}
+
 	return c.json({
 		updatedAt: new Date(now).toISOString(),
 		stats: {
@@ -215,5 +224,6 @@ export default async function networkHandler(c: Context): Promise<Response> {
 		demoCheat,
 		sla,
 		rerun,
+		payments,
 	});
 }
