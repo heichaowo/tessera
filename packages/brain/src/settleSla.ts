@@ -81,12 +81,19 @@ export async function settleSla(id: AgentIdentity): Promise<void> {
 				value: parseUnits(String(cr.amountUsd), 18),
 				data: toHex(memo),
 			});
-			// Also emit it via the Memo contract for a clean, indexed audit event.
-			const memoTx = await wallet.sendTransaction({
-				to: MEMO_ADDR,
-				data: toHex(memo),
-				value: 0n,
-			});
+			// Also emit it via the Memo contract for a clean, indexed audit event —
+			// but best-effort: a memo failure must NOT skip recording the payment,
+			// or the credit stays pending and gets paid again next cycle.
+			let memoTx: string | null = null;
+			try {
+				memoTx = await wallet.sendTransaction({
+					to: MEMO_ADDR,
+					data: toHex(memo),
+					value: 0n,
+				});
+			} catch (e) {
+				console.error(`[sla] memo failed (payment stands):`, e);
+			}
 			await fetch(`${config.coreUrl}/api/v1/sla/paid`, {
 				method: "POST",
 				headers: {

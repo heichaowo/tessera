@@ -39,7 +39,12 @@ export async function demoInsolventHandler(c: Context): Promise<Response> {
 	const redis = getRedis();
 	const models = getModels();
 	let node = String(b.node || "");
-	if (!node) {
+	if (node) {
+		// Validate a caller-supplied node against known routers so arbitrary
+		// strings can't be written as demo:poor:* keys.
+		const known = await models.routers.findOne({ where: { name: node } });
+		if (!known) return c.json({ ok: false, reason: "unknown node" });
+	} else {
 		const provider = await models.routers.findOne({
 			where: { asn: config.arc.slaProviderAsn },
 		});

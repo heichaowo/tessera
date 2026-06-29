@@ -445,6 +445,9 @@ async function tick(){
   // A rate-limited/error response is valid JSON without `stats` — skip this poll
   // gracefully (the interval retries) instead of throwing and freezing the page.
   if(!d || !d.stats){ const w=document.getElementById("liveWrap"),l=document.getElementById("live"); if(w){w.style.display="";w.style.color="var(--amber)";} if(l) l.textContent="reconnecting…"; return; }
+  // defensive: never let a partial response (null arrays) throw mid-render
+  if(!Array.isArray(d.peerings)) d.peerings=[];
+  if(!Array.isArray(d.nodes)) d.nodes=[];
   const s=d.stats;
   const conv=Math.max(0,(s.peeringSessions||0)-(s.established||0)), flagged=s.usageFlagged||0, allNodes=s.nodesOnline===s.nodes;
   const degraded=!allNodes||flagged>0||(s.establishedPairs||0)===0||!!d.demoCheat;

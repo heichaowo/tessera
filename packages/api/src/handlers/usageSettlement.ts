@@ -111,6 +111,7 @@ export async function demoCheatHandler(c: Context): Promise<Response> {
  * which peers to settle, and for the dashboard).
  */
 export async function usageListHandler(c: Context): Promise<Response> {
+	if (!authed(c)) return c.json({ code: 401, message: "Unauthorized" }, 401);
 	const node = c.req.param("node");
 	const redis = getRedis();
 	const models = getModels();

@@ -34,10 +34,14 @@ function authed(c: Context): boolean {
 /** POST /api/v1/demo/rerun — public: reset the mesh + flag a rebuild. */
 export async function demoRerunHandler(c: Context): Promise<Response> {
 	const redis = getRedis();
-	const ttl = await redis.ttl(LOCK);
-	if (ttl > 0) return c.json({ ok: false, busy: true, ttl });
-	await redis.set(LOCK, "1");
-	await redis.expire(LOCK, COOLDOWN);
+	// Atomic acquire: SET NX EX in one round-trip so concurrent clicks can't both
+	// pass the guard and double-fire the destructive teardown (and the TTL can't
+	// be lost between a separate SET and EXPIRE).
+	const acquired = await redis.set(LOCK, "1", "EX", COOLDOWN, "NX");
+	if (!acquired) {
+		const ttl = await redis.ttl(LOCK);
+		return c.json({ ok: false, busy: true, ttl: ttl > 0 ? ttl : COOLDOWN });
+	}
 	await redis.set(PHASE, "tearing down");
 	// Tear down: delete every session. Agents reconcile + remove WG/BIRD next sync.
 	const models = getModels();
