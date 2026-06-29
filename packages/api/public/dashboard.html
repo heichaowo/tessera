@@ -52,10 +52,15 @@
   [data-theme="light"] .detrow td,
   [data-theme="light"] .nego,
   [data-theme="light"] td{border-color:#e3e9e4}
-  #themeBtn{position:fixed;top:13px;right:14px;z-index:10000;background:var(--panel);color:var(--txt);
-    border:1px solid var(--line);border-radius:9px;padding:6px 9px;font-size:14px;line-height:1;cursor:pointer;
-    font-family:inherit;box-shadow:0 2px 10px rgba(0,0,0,.22)}
-  #themeBtn:hover{border-color:var(--green-bright)}
+  #themeBtn{position:fixed;top:15px;right:18px;z-index:10000;width:36px;height:36px;display:grid;place-items:center;
+    background:var(--panel2);color:var(--green-bright);border:1px solid var(--line);border-radius:50%;cursor:pointer;
+    padding:0;backdrop-filter:blur(6px);transition:border-color .2s,box-shadow .2s,transform .2s}
+  #themeBtn:hover{border-color:var(--green-bright);box-shadow:0 0 14px rgba(93,255,143,.3);transform:translateY(-1px)}
+  #themeBtn:active{transform:translateY(0)}
+  #themeBtn .ic{display:none}
+  [data-theme="dark"] #themeBtn .ic-sun{display:block}
+  [data-theme="light"] #themeBtn .ic-moon{display:block}
+  [data-theme="light"] #themeBtn:hover{box-shadow:0 0 12px rgba(12,138,62,.22)}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);position:relative;
     font:13.5px/1.55 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
@@ -154,20 +159,22 @@
     box-shadow:0 0 0 0 rgba(61,220,151,.7);animation:p 2s infinite}
   @keyframes p{70%{box-shadow:0 0 0 7px rgba(61,220,151,0)}100%{box-shadow:0 0 0 0 rgba(61,220,151,0)}}
   .empty{color:var(--dim);padding:14px 4px}
-  .nodes{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+  .nodes{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:10px}
   .ncard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;display:flex;align-items:center;gap:11px}
   .ncard .flag{font-size:22px;line-height:1}
   .ncard .info{flex:1;min-width:0}
-  .ncard .nm{font-weight:600} .ncard .nm small{color:var(--dim);font-weight:500;margin-left:6px}
+  .ncard .nm{font-weight:600} .ncard .nm small{display:block;color:var(--dim);font-weight:500;font-size:10.5px;letter-spacing:.2px;margin-top:1px}
   .ncard .loc{color:var(--dim);font-size:12px}
   .ncard .bw{text-align:right;font-variant-numeric:tabular-nums;font-size:12.5px;white-space:nowrap;line-height:1.45}
   .ncard .up{color:#7aa2ff} .ncard .down{color:var(--green)}
   .ndot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
-  .fpin{text-align:center;pointer-events:none;transform:translateY(4px)}
-  .fpin .fl{font-size:20px;line-height:1;filter:drop-shadow(0 0 5px rgba(0,0,0,.75))}
-  .fpin .nm{font-size:9.5px;letter-spacing:.5px;color:var(--green-bright);text-transform:uppercase;margin-top:1px;
-    text-shadow:0 0 5px #000,0 0 5px #000;white-space:nowrap}
-  .fpin.off .nm{color:var(--dim)} .fpin.off .fl{filter:grayscale(.6) drop-shadow(0 0 5px rgba(0,0,0,.75))}
+  .fpin{text-align:center;pointer-events:none;transform:translateY(3px)}
+  .fpin .fl{font-size:17px;line-height:1;filter:drop-shadow(0 0 4px rgba(0,0,0,.85))}
+  /* Map sits on the always-dark globe, so the pin label uses fixed dark-bg
+     colours (not theme vars) and a small pill so clustered nodes stay legible. */
+  .fpin .nm{font-size:8.5px;font-weight:700;letter-spacing:.6px;color:#6effa0;text-transform:uppercase;margin-top:2px;
+    background:rgba(6,10,8,.72);padding:1px 5px;border-radius:6px;white-space:nowrap;display:inline-block}
+  .fpin.off .nm{color:#9fb0a6} .fpin.off .fl{filter:grayscale(.6) drop-shadow(0 0 4px rgba(0,0,0,.85))}
   .mapboxgl-popup-content{background:#0e1626;color:var(--txt);border:1px solid var(--line);font-size:12px;border-radius:8px}
   .mapboxgl-popup-tip{border-top-color:#0e1626!important;border-bottom-color:#0e1626!important}
   .maphint{position:absolute;right:14px;top:14px;z-index:3;background:rgba(7,11,8,.82);border:1px solid var(--line);
@@ -180,7 +187,10 @@
 </style>
 </head>
 <body>
-<button id="themeBtn" onclick="toggleTheme()" title="Toggle day / night" aria-label="Toggle theme">🌙</button>
+<button id="themeBtn" onclick="toggleTheme()" title="Toggle day / night" aria-label="Toggle theme">
+  <svg class="ic ic-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.6v2.4M12 20v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M1.6 12h2.4M20 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+  <svg class="ic ic-moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 13.3A8.2 8.2 0 1 1 10.7 3.5 6.4 6.4 0 0 0 20.5 13.3z"/></svg>
+</button>
 <div class="wrap">
   <header>
     <div class="title">TESS<b>ERA</b></div>
@@ -256,24 +266,17 @@
 </div>
 
 <script>
-// ── Day/night toggle (theme is pre-set in <head>; this drives the button) ──
-function syncThemeBtn(){
-  const b=document.getElementById("themeBtn");
-  if(b) b.textContent = document.documentElement.dataset.theme==="light" ? "☀️" : "🌙";
-}
+// ── Day/night toggle (theme pre-set in <head>; CSS shows the right icon) ──
 function toggleTheme(){
   const next = document.documentElement.dataset.theme==="light" ? "dark" : "light";
   document.documentElement.dataset.theme = next;
   try{ localStorage.setItem("tessera-theme", next); }catch(e){}
-  syncThemeBtn();
 }
 // follow the device live until the user makes an explicit choice
 try{ matchMedia("(prefers-color-scheme: light)").addEventListener("change", e=>{
-  if(!localStorage.getItem("tessera-theme")){
-    document.documentElement.dataset.theme = e.matches?"light":"dark"; syncThemeBtn();
-  }
+  if(!localStorage.getItem("tessera-theme"))
+    document.documentElement.dataset.theme = e.matches?"light":"dark";
 }); }catch(e){}
-syncThemeBtn();
 
 const EXPLORER="https://testnet.arcscan.app";
 const GW="0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
@@ -405,12 +408,15 @@ function renderFlagMarkers(nodes){
     }
     m.getElement().innerHTML=
       `<div class="fpin ${n.online?'on':'off'}"><div class="fl">${FLAG[n.name]||'🏳️'}</div>`+
-      `<div class="nm">${n.name} · AS${n.asn||'?'}</div></div>`;
+      `<div class="nm">${n.name}</div></div>`;
   }
 }
 
 async function tick(){
   let d; try{ d=await (await fetch("/api/v1/network",{cache:"no-store"})).json(); lastFetch=Date.now(); }catch(e){ const w=document.getElementById("liveWrap"),l=document.getElementById("live"); if(w){w.style.display="";w.style.color="var(--amber)";} if(l) l.textContent="reconnecting…"; return; }
+  // A rate-limited/error response is valid JSON without `stats` — skip this poll
+  // gracefully (the interval retries) instead of throwing and freezing the page.
+  if(!d || !d.stats){ const w=document.getElementById("liveWrap"),l=document.getElementById("live"); if(w){w.style.display="";w.style.color="var(--amber)";} if(l) l.textContent="reconnecting…"; return; }
   const s=d.stats;
   const conv=Math.max(0,(s.peeringSessions||0)-(s.established||0)), flagged=s.usageFlagged||0, allNodes=s.nodesOnline===s.nodes;
   const degraded=!allNodes||flagged>0||(s.establishedPairs||0)===0||!!d.demoCheat;
