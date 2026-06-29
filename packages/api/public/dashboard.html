@@ -3,15 +3,59 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
 <title>Tessera — Trustless Interconnect &amp; Settlement on Arc</title>
 <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.1/mapbox-gl.css" rel="stylesheet" />
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.1/mapbox-gl.js"></script>
+<script>
+  // Set the theme before first paint (avoids a flash): stored choice, else
+  // follow the device's prefers-color-scheme. The toggle persists a choice.
+  try {
+    document.documentElement.dataset.theme =
+      localStorage.getItem("tessera-theme") ||
+      (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  } catch (e) {
+    document.documentElement.dataset.theme = "dark";
+  }
+</script>
 <style>
   :root{
     --bg:#070b08; --panel:#0c130d; --panel2:#0a110b; --line:#16331f; --grid:#0e1b12;
     --txt:#cfeed8; --dim:#5b7a63; --accent:#5dff8f; --gold:#f5c451;
     --green:#4ade80; --green-bright:#5dff8f; --amber:#f5c451; --link:#5ad1ff;
   }
+  /* ── Day mode ─────────────────────────────────────────────────────────────
+     Theme is set pre-paint in <head> (stored choice, else device preference);
+     the ☀/🌙 toggle persists a choice. Keeps the green identity, darkened for
+     contrast on a light surface, and dials back the CRT glow/scanlines that
+     only read on black. Map overlays stay dark (they sit on the dark globe). */
+  :root[data-theme="light"]{
+    --bg:#eef2ee; --panel:#ffffff; --panel2:#f4f8f5; --line:#cdddd1; --grid:#e6ece7;
+    --txt:#12241a; --dim:#5d7268; --accent:#0b8a3e; --gold:#8a5e00;
+    --green:#0c8a3e; --green-bright:#0a7d39; --amber:#a76d08; --link:#0a6fb5;
+  }
+  [data-theme="light"] body::after{opacity:.16}
+  [data-theme="light"] .title,
+  [data-theme="light"] .card .v,
+  [data-theme="light"] .herohead{text-shadow:none}
+  [data-theme="light"] .tag{background:#eef6ee;border-color:#cdddd1}
+  [data-theme="light"] .hcol.trad{background:#fcf1f1;border-color:#e6c9c9}
+  [data-theme="light"] .hcol.ours{background:#eef7f0;border-color:#bfe0cb}
+  [data-theme="light"] .hcol.trad .hcolh{color:#b4453f}
+  [data-theme="light"] .hcol.trad .hrow .v{color:#8a5a5a}
+  [data-theme="light"] .hrow{border-top-color:#00000010}
+  [data-theme="light"] .dbtn{background:#fff6e6;border-color:#e0c489;color:#8a5e00}
+  [data-theme="light"] .dbtn:hover{background:#ffeecb}
+  [data-theme="light"] .ncard .up{color:#2a5bd0}
+  [data-theme="light"] .cheatbanner{background:#fdf3e3;border-color:#e0c489}
+  [data-theme="light"] .b-est,[data-theme="light"] .b-conv,[data-theme="light"] .b-build{color:#fff}
+  [data-theme="light"] .detrow td,
+  [data-theme="light"] .nego,
+  [data-theme="light"] td{border-color:#e3e9e4}
+  #themeBtn{position:fixed;top:13px;right:14px;z-index:10000;background:var(--panel);color:var(--txt);
+    border:1px solid var(--line);border-radius:9px;padding:6px 9px;font-size:14px;line-height:1;cursor:pointer;
+    font-family:inherit;box-shadow:0 2px 10px rgba(0,0,0,.22)}
+  #themeBtn:hover{border-color:var(--green-bright)}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);position:relative;
     font:13.5px/1.55 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
@@ -136,6 +180,7 @@
 </style>
 </head>
 <body>
+<button id="themeBtn" onclick="toggleTheme()" title="Toggle day / night" aria-label="Toggle theme">🌙</button>
 <div class="wrap">
   <header>
     <div class="title">TESS<b>ERA</b></div>
@@ -211,6 +256,25 @@
 </div>
 
 <script>
+// ── Day/night toggle (theme is pre-set in <head>; this drives the button) ──
+function syncThemeBtn(){
+  const b=document.getElementById("themeBtn");
+  if(b) b.textContent = document.documentElement.dataset.theme==="light" ? "☀️" : "🌙";
+}
+function toggleTheme(){
+  const next = document.documentElement.dataset.theme==="light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  try{ localStorage.setItem("tessera-theme", next); }catch(e){}
+  syncThemeBtn();
+}
+// follow the device live until the user makes an explicit choice
+try{ matchMedia("(prefers-color-scheme: light)").addEventListener("change", e=>{
+  if(!localStorage.getItem("tessera-theme")){
+    document.documentElement.dataset.theme = e.matches?"light":"dark"; syncThemeBtn();
+  }
+}); }catch(e){}
+syncThemeBtn();
+
 const EXPLORER="https://testnet.arcscan.app";
 const GW="0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 // geographic positions of the demo nodes [lng,lat]
