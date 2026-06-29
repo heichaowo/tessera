@@ -38,3 +38,12 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 docs/.vitepress/dist
 docs/.vitepress/cache
 docs-legacy
+
+# project secrets (CP-only, never commit)
+.brain.env
+*.brain.env
+.env.runtime
+.cp-setup.ts
+demo-wallets*.json
+.demo-wallets*.json
+*.key
