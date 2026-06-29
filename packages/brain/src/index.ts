@@ -81,4 +81,38 @@ if (config.usageSettle.enabled) {
 	};
 	await run();
 	setInterval(run, config.usageSettle.windowMs);
+
+	// One-click "reset & rerun from zero": the dashboard button tears the mesh
+	// down and flags a rebuild; poll briefly and, when claimed, run a single
+	// establishment round so every agent re-discovers, re-negotiates, pays, and
+	// rebuilds its paid peerings — the from-zero formation the demo shows.
+	const checkRerun = async () => {
+		try {
+			const res = await fetch(`${config.coreUrl}/api/v1/demo/rerun-claim`, {
+				method: "POST",
+				headers: { Authorization: `Bearer ${config.agentApiKey}` },
+			});
+			const { claimed } = (await res.json()) as { claimed?: boolean };
+			if (!claimed) return;
+			console.log("[rerun] claimed — rebuilding mesh from zero");
+			// Give agents a moment to tear down the deleted sessions first.
+			await new Promise((r) => setTimeout(r, 8000));
+			// Two rounds: each brain peers the subset it chooses, so a single
+			// round leaves a few pairs uncovered. A second round (reputation now
+			// updated, existing pairs deduped 422) fills in most of the rest.
+			for (let round = 1; round <= 2; round++) {
+				for (const b of brains) {
+					try {
+						await b.tick();
+					} catch (e) {
+						console.error("[rerun] tick error:", e);
+					}
+				}
+			}
+			console.log("[rerun] rebuild rounds complete");
+		} catch {
+			/* transient — next poll retries */
+		}
+	};
+	setInterval(checkRerun, 10000);
 }

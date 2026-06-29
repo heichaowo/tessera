@@ -34,6 +34,22 @@ const ROUTE_LIMITS: Record<string, RateLimitConfig> = {
 		maxRequests: 30,
 		keyPrefix: "rl:admin",
 	},
+	// Public read-only dashboard state. The serve-dashboard proxy doesn't forward
+	// the client IP, so every viewer's ~5s poll shares the "unknown" bucket — a
+	// low limit here makes the dashboard 429 ("Waiting for heartbeats…") under
+	// even a couple of concurrent viewers. It's read-only, so allow generously.
+	"/api/v1/network": {
+		windowMs: 60 * 1000,
+		maxRequests: 6000,
+		keyPrefix: "rl:network",
+	},
+	// Public demo controls + the brain's rerun-claim poll (also shared bucket).
+	// The destructive rerun is separately cooldown-locked in its handler.
+	"/api/v1/demo": {
+		windowMs: 60 * 1000,
+		maxRequests: 600,
+		keyPrefix: "rl:demo",
+	},
 	default: {
 		windowMs: 60 * 1000,
 		maxRequests: 60,

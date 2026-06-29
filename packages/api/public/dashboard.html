@@ -104,6 +104,11 @@
   .panel::after{bottom:-1px;right:-1px;border-left:0;border-top:0;border-bottom-right-radius:4px}
   .panel h3{margin:0 0 12px;font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;font-weight:600}
   .panel h3 .sub2{color:#46604f;font-weight:400;text-transform:none;letter-spacing:0;font-size:11px}
+  .rerunbar{margin:0 0 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .rerunhint{color:var(--dim);font-size:11.5px}
+  .rerunbanner{display:none;margin:0 0 14px;border:1px solid var(--green-bright);background:rgba(93,255,143,.08);
+    color:var(--green-bright);border-radius:10px;padding:11px 15px;font-size:12.5px;line-height:1.5}
+  [data-theme="light"] .rerunbanner{background:#eef7f0;border-color:#bfe0cb}
   .cheatbanner{display:none;margin:0 0 14px;border:1px solid #5a3a12;background:#1c1306;color:var(--amber);
     border-radius:10px;padding:11px 14px;font-size:12.5px;letter-spacing:.3px}
   .cheatbanner b{color:var(--gold)}
@@ -226,6 +231,8 @@
 
   <div class="statusbar" id="statusbar"></div>
   <div class="cheatbanner" id="cheatBanner"></div>
+  <div class="rerunbanner" id="rerunBanner"></div>
+  <div class="rerunbar"><button class="dbtn rerunbtn" id="rerunBtn" onclick="rerunMesh()">⟳ Reset &amp; rerun from zero</button><span class="rerunhint">tears down every paid peering, then agents re-discover · negotiate · pay · rebuild — watch it live</span></div>
   <div class="ticker"><div class="row" id="ticker">loading settlements…</div></div>
   <div class="cards" id="cards"></div>
 
@@ -324,6 +331,15 @@ async function simulateSlaBreach(){
   try{ await fetch("/api/v1/demo/sla-breach",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}); }catch(e){}
   setTimeout(()=>{ b.disabled=false; b.textContent="▶ Simulate SLA breach"; tick(); }, 3000);
   tick();
+}
+async function rerunMesh(){
+  const b=document.getElementById("rerunBtn");
+  b.disabled=true; b.textContent="⟳ resetting…";
+  try{
+    const r=await (await fetch("/api/v1/demo/rerun",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})).json();
+    if(r&&r.busy) b.textContent=`⟳ rebuilding… (${r.ttl}s)`;
+  }catch(e){}
+  setTimeout(tick, 1500);
 }
 const pairKey=(a,b)=>[a,b].sort().join("~");
 
@@ -527,6 +543,13 @@ async function tick(){
   if(d.demoCheat){ cb.style.display="block";
     cb.innerHTML=`⚠ <b>DEMO:</b> simulating a cheating agent — <b>${d.demoCheat.node}</b> is over-reporting its sent traffic ×3. Watch bilateral cross-attestation flag it below; billing stays on the conservative value, so funds are safe. Auto-reverts in <b>${d.demoCheat.ttl}s</b>.`;
   } else cb.style.display="none";
+
+  // One-click reset & rerun: "rebuilding from zero" banner + button lock
+  const rb=document.getElementById("rerunBanner"), rbtn=document.getElementById("rerunBtn");
+  if(d.rerun){ if(rb){ rb.style.display="block";
+      rb.innerHTML=`🔄 <b>Rebuilding the mesh from zero</b> — every paid peering was torn down; agents are re-discovering, negotiating, paying &amp; re-establishing on Arc. Watch the globe reform. <span style="opacity:.7">· ${d.rerun.phase} · ~${d.rerun.ttl}s</span>`; }
+    if(rbtn){ rbtn.disabled=true; rbtn.textContent="⟳ rebuilding…"; }
+  } else { if(rb) rb.style.display="none"; if(rbtn){ rbtn.disabled=false; rbtn.textContent="⟳ Reset & rerun from zero"; } }
 
   // Route A: HK provider SLA + automatic nano-compensation
   const sla=d.sla;

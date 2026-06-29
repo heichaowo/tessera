@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { getModels } from "../db/dbContext";
 import { PeeringStatus } from "../db/models/bgpSessions";
 import { getRedis } from "../db/redisContext";
+import { rerunStatus } from "./demoRerun";
 import { slaSummary } from "./sla";
 
 /**
@@ -181,6 +182,14 @@ export default async function networkHandler(c: Context): Promise<Response> {
 		/* redis optional */
 	}
 
+	// One-click reset & rerun status (for the "rebuilding from zero" banner).
+	let rerun: { phase: string; ttl: number } | null = null;
+	try {
+		rerun = await rerunStatus();
+	} catch {
+		/* redis optional */
+	}
+
 	return c.json({
 		updatedAt: new Date(now).toISOString(),
 		stats: {
@@ -205,5 +214,6 @@ export default async function networkHandler(c: Context): Promise<Response> {
 		negotiations,
 		demoCheat,
 		sla,
+		rerun,
 	});
 }

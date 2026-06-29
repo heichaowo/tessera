@@ -8,6 +8,10 @@ import metricsHandler from "./handlers/metrics";
 import networkHandler from "./handlers/network";
 import peeringHandler from "./handlers/peering";
 import {
+	demoRerunClaimHandler,
+	demoRerunHandler,
+} from "./handlers/demoRerun";
+import {
 	demoSlaBreachHandler,
 	slaPaidHandler,
 	slaPendingHandler,
@@ -65,4 +69,8 @@ export function registerRoutes(app: Hono) {
 	app.get("/api/v1/sla/pending", slaPendingHandler);
 	app.post("/api/v1/sla/paid", slaPaidHandler);
 	app.post("/api/v1/demo/sla-breach", demoSlaBreachHandler);
+
+	// One-click "reset & rerun from zero" (public, cooldown-locked) + brain claim
+	app.post("/api/v1/demo/rerun", demoRerunHandler);
+	app.post("/api/v1/demo/rerun-claim", demoRerunClaimHandler);
 }
