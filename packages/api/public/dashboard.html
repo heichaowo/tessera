@@ -232,7 +232,7 @@
   <div class="statusbar" id="statusbar"></div>
   <div class="cheatbanner" id="cheatBanner"></div>
   <div class="rerunbanner" id="rerunBanner"></div>
-  <div class="rerunbar"><button class="dbtn rerunbtn" id="rerunBtn" onclick="rerunMesh()">⟳ Reset &amp; rerun from zero</button><span class="rerunhint">tears down every paid peering, then agents re-discover · negotiate · pay · rebuild — watch it live</span></div>
+  <div class="rerunbar"><button class="dbtn rerunbtn" id="rerunBtn" onclick="rerunMesh()">⟳ Reset &amp; rerun from zero</button><span class="rerunhint">tears down every paid peering, then agents re-discover · negotiate · pay · rebuild — watch it live · ⏱ ~2–4 min to fully reconverge</span></div>
   <div class="ticker"><div class="row" id="ticker">loading settlements…</div></div>
   <div class="cards" id="cards"></div>
 
@@ -260,17 +260,17 @@
   </div>
 
   <div class="panel">
-    <h3><button class="dbtn" id="resetBtn" onclick="resetDemo()" style="margin-left:8px">↻ reset</button><button class="dbtn" id="cheatBtn" onclick="simulateCheat()">▶ Simulate a cheating agent</button>Usage net settlements <span class="sub2">· per-GB · net-receiver pays · two-sided cross-attested · agents auto-settle real metered traffic on Arc · testbed load</span></h3>
+    <h3><button class="dbtn" id="resetBtn" onclick="resetDemo()" style="margin-left:8px">↻ reset</button><button class="dbtn" id="cheatBtn" onclick="simulateCheat()">▶ Simulate a cheating agent</button>Usage net settlements <span class="sub2">· per-GB · net-receiver pays · two-sided cross-attested · agents auto-settle real metered traffic on Arc · testbed load · ⏱ flags within ~15s (next settlement)</span></h3>
     <div id="usage"><div class="empty">No usage settlements yet — agents settle net traffic each window.</div></div>
   </div>
 
   <div class="panel">
-    <h3><button class="dbtn" id="slaBtn" onclick="simulateSlaBreach()">▶ Simulate SLA breach</button>HK provider SLA + auto-compensation <span class="sub2" id="slaSub">· large provider commits availability · breach → automatic USDC nano-credit, paid + memo'd on-chain by HK · no claims process</span></h3>
+    <h3><button class="dbtn" id="slaBtn" onclick="simulateSlaBreach()">▶ Simulate SLA breach</button>HK provider SLA + auto-compensation <span class="sub2" id="slaSub">· large provider commits availability · breach → automatic USDC nano-credit, paid + memo'd on-chain by HK · no claims process · ⏱ auto-refund lands in ~60–90s on-chain</span></h3>
     <div id="sla"><div class="empty">No SLA breaches — HK is meeting its commitment.</div></div>
   </div>
 
   <div class="panel">
-    <h3><button class="dbtn" id="poorBtn" onclick="simulateInsolvent()">▶ Simulate insufficient balance</button>Payment integrity <span class="sub2">· an agent that can't pay defaults · settlement is rejected, the peering is flagged at-risk, and the defaulter's standing drops — non-payment has a cost</span></h3>
+    <h3><button class="dbtn" id="poorBtn" onclick="simulateInsolvent()">▶ Simulate insufficient balance</button>Payment integrity <span class="sub2">· an agent that can't pay defaults · settlement is rejected, the peering is flagged at-risk, and the defaulter's standing drops — non-payment has a cost · ⏱ takes effect instantly</span></h3>
     <div id="payments"><div class="empty">All agents solvent — settlements are clearing.</div></div>
   </div>
 
