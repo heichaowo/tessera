@@ -69,6 +69,7 @@ export async function settleSla(id: AgentIdentity): Promise<void> {
 			console.log(`[sla:dry] credit ${cr.customer} $${cr.amountUsd}`);
 			continue;
 		}
+		try {
 			const memo =
 				`Tessera SLA credit | ${id.nodeName} -> ${cr.customer} | ` +
 				`breach: ${cr.reason} | $${cr.amountUsd} | auto-refund`;
