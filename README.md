@@ -50,6 +50,14 @@ Because Gateway can net sub-cent flows and settle in batches, peering can be pri
 - **Establishment fee** — a one-time tessera to forge the peering (implemented).
 - **Continuous usage settlement** — meter real WireGuard tx/rx both ways and settle the **net** in real time, with bilateral cross-attestation so neither side can over-bill. Balanced peering nets to ~free automatically; imbalanced pays the net provider in proportion to actual usage. Fairness becomes mechanical and transparent, and the long tail can finally peer (implemented — M2b-3).
 
+## Roadmap / vision
+
+The coordination + settlement layer is built; these extend it (out of scope for the hackathon, but the design already points at them):
+
+- **Substrate-agnostic forwarding** — the agent / negotiation / settlement loop sits above forwarding, so it ports beyond TCP/IP to post-IP inter-domain routing like **SCION** or name-based **NDN** by swapping only the "bring up a link + meter it" adapter (see above). A world of heterogeneous fabrics only *raises* the need for a neutral cross-operator settlement layer.
+- **Trustless metering (PoB / TEE)** — usage is self-reported today and kept honest by bilateral cross-attestation. The end state replaces trust with cryptographic proof: a Proof-of-Backhaul challenger, or a TEE-signed byte counter, so the metered value is provable rather than attested.
+- **Decentralized admission (stake-weighted)** — as many overlay/DePIN networks federate, new-member admission can move from a human-reviewed registry to **stake-weighted vouching** by existing members' agents — reusing the same Arc stake as the Sybil cost. (Identity/ownership of an ASN/prefix is a fact and still needs a registry/RPKI-style anchor; only the *relationship/credit/route-acceptance* trust is what gets decentralized.)
+
 ## Architecture
 
 ```
