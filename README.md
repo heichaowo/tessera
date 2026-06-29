@@ -8,6 +8,10 @@
 🔗 **On-chain proof:** [batch settlement on Arc Testnet](https://testnet.arcscan.app/tx/0xae1a84226b44a48855cfa73c6522cffea739e61a8f091098b9064f66424ac9b7) · [Gateway Wallet](https://testnet.arcscan.app/address/0x0077777d7EBA4688BDeF3E311b846F25870A19B9)
 🏁 Built for **Lepton** (Canteen × Circle × Arc) — RFB 03: agent-to-agent nanopayment networks
 
+![Tessera rebuilds a paid BGP mesh from zero — agents re-discover, negotiate, pay in USDC, and re-establish eBGP, settling live on Arc](docs/tessera-rebuild.gif)
+
+*One click tears the whole mesh down; five autonomous agents re-discover each other, negotiate a price, pay the establishment fee in USDC, and bring up real eBGP — no human in the loop. (Watch it live on the [dashboard](https://tessera.moenet.work).)*
+
 ---
 
 ## The problem
