@@ -69,16 +69,18 @@ export async function settleSla(id: AgentIdentity): Promise<void> {
 			console.log(`[sla:dry] credit ${cr.customer} $${cr.amountUsd}`);
 			continue;
 		}
-		try {
+			const memo =
+				`Tessera SLA credit | ${id.nodeName} -> ${cr.customer} | ` +
+				`breach: ${cr.reason} | $${cr.amountUsd} | auto-refund`;
 			// Real USDC refund: native value transfer (Arc native == USDC, 18dp).
+			// The memo rides in the transfer's calldata, so the refund tx itself
+			// is self-documenting on-chain (the recipient EOA ignores the data).
 			const payTx = await wallet.sendTransaction({
 				to: cr.customerWallet as `0x${string}`,
 				value: parseUnits(String(cr.amountUsd), 18),
+				data: toHex(memo),
 			});
-			// On-chain audit memo.
-			const memo =
-				`Tessera SLA credit | ${id.nodeName} -> ${cr.customer} | ` +
-				`breach: ${cr.reason} | $${cr.amountUsd} | auto-refund pay ${String(payTx).slice(0, 8)}`;
+			// Also emit it via the Memo contract for a clean, indexed audit event.
 			const memoTx = await wallet.sendTransaction({
 				to: MEMO_ADDR,
 				data: toHex(memo),
