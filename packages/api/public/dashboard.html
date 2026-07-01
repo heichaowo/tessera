@@ -245,7 +245,7 @@
   </div>
 
   <div class="panel">
-    <h3>Live agent negotiations <span class="sub2">· two-sided · LLM-reasoned (Sonnet) · reputation-weighted · repeat peers drift toward the floor</span></h3>
+    <h3>Live agent negotiations <span class="sub2">· two-sided · Sonnet for deals · Haiku for the live feed · reputation-weighted · repeat peers drift toward the floor</span></h3>
     <div id="negos"><div class="empty">No negotiations yet — agents negotiate each round.</div></div>
   </div>
 
@@ -505,7 +505,7 @@ async function tick(){
       const t=new Date(Number(n.ts||0)).toLocaleTimeString();
       const agreed=n.agreed, dec=n.decision||"";
       const col=agreed?"var(--green)":(dec==="reject"?"var(--amber)":"var(--link)");
-      const src=n.source==="llm"?`<span style="color:var(--green-bright)">Sonnet</span>`:"rules";
+      const src=n.source==="llm"?`<span style="color:var(--green-bright)">${/haiku/i.test(n.model||"")?"Haiku":/opus/i.test(n.model||"")?"Opus":/sonnet/i.test(n.model||"")?"Sonnet":"Claude"}</span>`:"rules";
       return `<div class="nego${isNew?" new":""}"><div class="negohead"><b>${n.requester} → ${n.provider}</b> · offer ${fmt(n.offerUsd)} → <span style="color:${col}">${dec} ${fmt(n.priceUsd)}</span>${agreed?" ✓ deal":""}<span class="negotag">${src} · rep ${Number(n.score||0).toFixed(2)} · ${t}</span></div><div class="negoreason">${String(n.reason||"").replace(/</g,"&lt;")}</div></div>`;
     }).join("")
     :`<div class="empty">No negotiations yet — agents negotiate each round.</div>`;

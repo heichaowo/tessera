@@ -10,6 +10,12 @@ export default {
 		url: process.env.MERIDIAN_URL || "http://127.0.0.1:3456",
 		apiKey: process.env.MERIDIAN_API_KEY || "x", // placeholder unless meridian auth is on
 		model: process.env.BRAIN_MODEL || "claude-sonnet-4-6",
+		// Display-only negotiation rounds use a lighter/faster model (Haiku) so the
+		// per-call meridian CLI-fork stays cheap; real establishment keeps `model`.
+		displayModel: process.env.BRAIN_DISPLAY_MODEL || "claude-haiku-4-5",
+		// Abort a stuck LLM call (default 45s, 1 retry) so a hung meridian child
+		// can't pile up and exhaust memory; on failure we fall back to rules.
+		timeoutMs: Number(process.env.BRAIN_LLM_TIMEOUT_MS) || 45_000,
 		// Default on; set BRAIN_LLM_ENABLED=false to force deterministic rules.
 		enabled: process.env.BRAIN_LLM_ENABLED !== "false",
 	},

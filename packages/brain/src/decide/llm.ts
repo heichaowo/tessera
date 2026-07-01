@@ -17,6 +17,9 @@ import { decideByRules } from "./rules";
 const client = new Anthropic({
 	baseURL: config.meridian.url,
 	apiKey: config.meridian.apiKey,
+	// Bound each call so a hung meridian CLI child aborts instead of piling up.
+	timeout: config.meridian.timeoutMs,
+	maxRetries: 1,
 });
 
 const LlmDecision = z.object({

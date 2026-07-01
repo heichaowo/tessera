@@ -73,6 +73,9 @@ const Result = z.object({
 const client = new Anthropic({
 	baseURL: config.meridian.url,
 	apiKey: config.meridian.apiKey,
+	// Bound each call so a hung meridian CLI child aborts instead of piling up.
+	timeout: config.meridian.timeoutMs,
+	maxRetries: 1,
 });
 
 const SYSTEM = `You are the provider-side peering negotiator for a BGP node.
@@ -81,16 +84,17 @@ Price band (USDC): floor=${config.price.floorUsd}, list/target=${config.price.ta
 Never sell below floor. Reward trusted requesters (high reputation) with prices nearer the floor; charge unknown ones near list; reject if you have no capacity or reputation is below ${config.reputationFloor}.
 Respond with STRICT JSON only: {"decision":"accept|counter|reject","priceUsd":<number>,"reason":"<short why>"}`;
 
-export async function negotiate(offer: PeerOffer): Promise<{
+export async function negotiate(offer: PeerOffer, model?: string): Promise<{
 	result: NegotiationResult;
 	source: "llm" | "rules";
+	model?: string;
 }> {
 	if (!config.meridian.enabled) {
 		return { result: negotiateByRules(offer), source: "rules" };
 	}
 	try {
 		const msg = await client.messages.create({
-			model: config.meridian.model,
+			model: model || config.meridian.model,
 			max_tokens: 512,
 			system: SYSTEM,
 			messages: [{ role: "user", content: JSON.stringify(offer) }],
@@ -106,7 +110,7 @@ export async function negotiate(offer: PeerOffer): Promise<{
 			parsed.decision === "reject"
 				? parsed.priceUsd
 				: Math.max(config.price.floorUsd, parsed.priceUsd);
-		return { result: { ...parsed, priceUsd }, source: "llm" };
+		return { result: { ...parsed, priceUsd }, source: "llm", model: model || config.meridian.model };
 	} catch (err) {
 		console.warn(
 			`[brain] negotiation LLM failed (${(err as Error).message}); using rules`,

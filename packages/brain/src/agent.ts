@@ -9,6 +9,10 @@ import type { AgentIdentity } from "./types";
 
 export class AgentBrain {
 	private spent = 0;
+	// ② display-negotiation throttle: peers already shown are skipped unless
+	// they're this cycle's rotation pick, so the live feed stays genuine + cheap.
+	private negoSeen = new Set<string>();
+	private peerRot = 0;
 
 	constructor(
 		private readonly id: AgentIdentity,
@@ -85,13 +89,21 @@ export class AgentBrain {
 			policy: config.policy,
 			candidates,
 		});
-		for (const d of decisions) {
+		// ② Only spend an LLM call on peers that are new or on this cycle's
+		// rotation pick; stable, already-shown pairs are skipped — a real
+		// negotiation trickles into the feed instead of re-running all pairs.
+		const pick = decisions.length ? this.peerRot++ % decisions.length : 0;
+		for (let i = 0; i < decisions.length; i++) {
+			const d = decisions[i];
+			if (this.negoSeen.has(d.peerName) && i !== pick) continue;
+			this.negoSeen.add(d.peerName);
 			const cand = byName.get(d.peerName);
 			const deal = await this.broker.negotiateDeal({
 				requester: this.id.name,
 				provider: d.peerName,
 				listUsd: d.payUsd,
 				available: cand?.capacity.available ?? 1,
+				model: config.meridian.displayModel, // display-only → lighter model
 			});
 			this.emitNegotiation(deal);
 		}
@@ -113,6 +125,7 @@ export class AgentBrain {
 				priceUsd: deal.priceUsd,
 				agreed: deal.agreed,
 				source: deal.source,
+				model: deal.model,
 				reason: deal.reason,
 				score: deal.requesterScore,
 			}),

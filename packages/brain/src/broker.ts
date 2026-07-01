@@ -18,6 +18,7 @@ export interface DealResult {
 	agreed: boolean;
 	priceUsd: number;
 	source: "llm" | "rules";
+	model?: string; // which model reasoned this row (undefined for rules)
 	log: string;
 	// structured detail for the live negotiation panel
 	requester: string;
@@ -61,19 +62,20 @@ export class NegotiationBroker {
 		listUsd: number;
 		available?: number;
 		premium?: boolean;
+		model?: string;
 	}): Promise<DealResult> {
 		const rep = this.rep(opts.provider);
 		const requesterScore = rep.score(opts.provider, opts.requester);
 		const offerUsd = round6(opts.listUsd * config.openOfferFactor);
 
-		const { result, source } = await negotiate({
+		const { result, source, model: usedModel } = await negotiate({
 			fromAgent: opts.requester,
 			toNode: opts.provider,
 			offerUsd,
 			requesterScore,
 			hasCapacity: (opts.available ?? 1) > 0,
 			premium: opts.premium,
-		});
+		}, opts.model);
 
 		// Buyer accepts an accept, or a counter at or below the list price.
 		let agreed = false;
@@ -102,6 +104,7 @@ export class NegotiationBroker {
 			agreed,
 			priceUsd: round6(priceUsd),
 			source,
+			model: usedModel,
 			log,
 			requester: opts.requester,
 			provider: opts.provider,

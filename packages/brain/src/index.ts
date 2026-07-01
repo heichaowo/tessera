@@ -43,6 +43,7 @@ console.log(
 
 const broker = new NegotiationBroker();
 const brains = identities.map((id) => new AgentBrain(id, broker));
+let negoIdx = 0; // rotates which brain refreshes its display negotiations each cycle
 if (!config.settleOnly) {
 	for (const b of brains) {
 		await b.tick();
@@ -69,18 +70,30 @@ if (config.usageSettle.enabled) {
 		} catch (e) {
 			console.error("[settle] cycle error:", e);
 		}
-		if (config.negotiateDisplay) {
-			for (const b of brains) {
-				try {
-					await b.negotiateRound();
-				} catch (e) {
-					console.error("[negotiate] round error:", e);
-				}
+		if (config.negotiateDisplay && brains.length) {
+			// Rotate: one brain refreshes its negotiations per cycle (not all five
+			// at once) so the live feed keeps moving while LLM calls drop ~5×.
+			const b = brains[negoIdx++ % brains.length];
+			try {
+				await b.negotiateRound();
+			} catch (e) {
+				console.error("[negotiate] round error:", e);
 			}
 		}
 	};
 	await run();
-	setInterval(run, config.usageSettle.windowMs);
+	// Self-scheduling (not setInterval): the next cycle starts only AFTER the
+	// previous finishes, so a slow round can never overlap and stack concurrent
+	// LLM calls — the overlap that piled up hung meridian children and ate RAM.
+	const scheduleNext = () =>
+		setTimeout(async () => {
+			try {
+				await run();
+			} finally {
+				scheduleNext();
+			}
+		}, config.usageSettle.windowMs);
+	scheduleNext();
 
 	// One-click "reset & rerun from zero": the dashboard button tears the mesh
 	// down and flags a rebuild; poll briefly and, when claimed, run a single
