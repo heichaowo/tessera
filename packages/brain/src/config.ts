@@ -52,6 +52,9 @@ export default {
 	// operator keeps the funder capitalised. Opt-in (needs the funder key set).
 	topup: {
 		enabled: process.env.BRAIN_TOPUP === "true",
+		// Prefer naming a node whose wallet is the treasury (no raw key to set);
+		// falls back to a standalone funder key if that node isn't an identity.
+		funderNode: process.env.BRAIN_FUNDER_NODE || "",
 		funderKey: (process.env.BRAIN_FUNDER_KEY || "") as `0x${string}`,
 		floorUsd: Number(process.env.BRAIN_TOPUP_FLOOR) || 2,
 		targetUsd: Number(process.env.BRAIN_TOPUP_TARGET) || 10,

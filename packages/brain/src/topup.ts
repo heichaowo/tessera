@@ -30,11 +30,25 @@ const arcChain = defineChain({
 
 /** Refill any node wallet that has dipped below the floor, up to the target. */
 export async function topUpNodes(identities: AgentIdentity[]): Promise<void> {
-	if (!config.topup.enabled || !config.topup.funderKey) return;
+	if (!config.topup.enabled) return;
+
+	// Funder: prefer naming a node whose wallet is the treasury (so no raw key
+	// ever has to be set/handled), else fall back to a standalone funder key.
+	let funderKey = config.topup.funderKey;
+	if (config.topup.funderNode) {
+		const f = identities.find(
+			(i) =>
+				i.name === config.topup.funderNode ||
+				i.nodeName === config.topup.funderNode,
+		);
+		if (f?.privateKey) funderKey = f.privateKey;
+	}
+	if (!funderKey) return;
+	const funderAcct = privateKeyToAccount(funderKey);
 
 	const pub = createPublicClient({ chain: arcChain, transport: http() });
 	const funder = createWalletClient({
-		account: privateKeyToAccount(config.topup.funderKey),
+		account: funderAcct,
 		chain: arcChain,
 		transport: http(),
 	});
@@ -42,6 +56,7 @@ export async function topUpNodes(identities: AgentIdentity[]): Promise<void> {
 	for (const id of identities) {
 		if (!id.privateKey) continue;
 		const addr = privateKeyToAccount(id.privateKey).address;
+		if (addr.toLowerCase() === funderAcct.address.toLowerCase()) continue; // never top up the funder itself
 
 		let balUsd: number;
 		try {
