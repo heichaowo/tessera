@@ -11,6 +11,7 @@ import { NegotiationBroker } from "./broker";
 import config from "./config";
 import { settleSla } from "./settleSla";
 import { settleAll } from "./settleUsage";
+import { topUpNodes } from "./topup";
 import type { AgentIdentity } from "./types";
 
 function loadIdentities(): AgentIdentity[] {
@@ -56,6 +57,9 @@ if (config.usageSettle.enabled) {
 		`[brain] usage settlement loop on (every ${config.usageSettle.windowMs / 1000}s, dryRun=${config.dryRun})`,
 	);
 	const run = async () => {
+			if (config.topup.enabled) {
+				try { await topUpNodes(identities); } catch (e) { console.error("[topup] cycle error:", e); }
+			}
 		// Route A first: pay out SLA breach credits promptly, before the (slower)
 		// usage-settlement sweep, so a breach is auto-refunded within a cycle.
 		for (const id of identities) {
@@ -128,4 +132,47 @@ if (config.usageSettle.enabled) {
 		}
 	};
 	setInterval(checkRerun, 10000);
+
+	// Health guardian: keep the dashboard showing a full mesh no matter what
+	// buttons got clicked. Heal only when BGP is stuck below target across two
+	// checks (a rerun that's climbing is left alone) and not healed recently, so
+	// a curious/hostile clicker can never leave the demo looking broken.
+	if (config.guardian.enabled) {
+		const { targetSessions: target, healCooldownMs } = config.guardian;
+		let lastEstablished = -1;
+		let stalled = 0;
+		let lastHealAt = 0;
+		const guardian = async () => {
+			try {
+				const r = await fetch(`${config.coreUrl}/api/v1/network`);
+				const { stats } = (await r.json()) as {
+					stats?: { established?: number };
+				};
+				const est = stats?.established ?? 0;
+				if (est >= target || est > lastEstablished) {
+					// Healthy, or still climbing (mid-rebuild) — leave it alone.
+					stalled = est >= target ? 0 : stalled;
+					lastEstablished = est;
+					return;
+				}
+				lastEstablished = est;
+				stalled++;
+				if (stalled >= 2 && Date.now() - lastHealAt > healCooldownMs) {
+					lastHealAt = Date.now();
+					stalled = 0;
+					console.log(`[guardian] mesh stuck at ${est}/${target} — healing`);
+					for (const b of brains) {
+						try {
+							await b.tick();
+						} catch (e) {
+							console.error("[guardian] tick error:", e);
+						}
+					}
+				}
+			} catch {
+				/* transient — next check retries */
+			}
+		};
+		setInterval(guardian, config.guardian.checkMs);
+	}
 }

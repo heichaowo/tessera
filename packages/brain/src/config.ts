@@ -47,6 +47,27 @@ export default {
 		windowMs: Number(process.env.BRAIN_USAGE_WINDOW_MS) || 180_000, // ~3 min
 	},
 
+	// Auto top-up: keep each node wallet above `floorUsd`, refilled to `targetUsd`
+	// from the central funder wallet. By-design autonomous distribution — the
+	// operator keeps the funder capitalised. Opt-in (needs the funder key set).
+	topup: {
+		enabled: process.env.BRAIN_TOPUP === "true",
+		funderKey: (process.env.BRAIN_FUNDER_KEY || "") as `0x${string}`,
+		floorUsd: Number(process.env.BRAIN_TOPUP_FLOOR) || 2,
+		targetUsd: Number(process.env.BRAIN_TOPUP_TARGET) || 10,
+	},
+
+	// Health guardian: periodically re-establish a mesh that got torn down or
+	// stuck (demo-button abuse, a node hiccup) so the public dashboard always
+	// trends back to a full mesh. Only heals when stuck below target AND not
+	// merely mid-rebuild, and rate-limits itself so it never bursts the LLM.
+	guardian: {
+		enabled: process.env.BRAIN_GUARDIAN !== "false",
+		checkMs: Number(process.env.BRAIN_GUARDIAN_CHECK_MS) || 90_000,
+		targetSessions: Number(process.env.BRAIN_GUARDIAN_TARGET) || 20,
+		healCooldownMs: Number(process.env.BRAIN_GUARDIAN_HEAL_MS) || 300_000,
+	},
+
 	// Skip the one-shot peering-establishment ticks (only run the settlement
 	// loop) — avoids re-triggering establishment when running settlement.
 	settleOnly: process.env.BRAIN_SETTLE_ONLY === "true",
