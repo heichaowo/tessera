@@ -6,6 +6,16 @@
  */
 
 const CORE = process.env.CORE_URL || "http://127.0.0.1:3000";
+
+// Real client IP (Cloudflare in front sets cf-connecting-ip / x-forwarded-for)
+// forwarded to the control plane so it can per-IP throttle the demo buttons.
+function clientIp(req: Request): string {
+	return (
+		req.headers.get("cf-connecting-ip") ||
+		(req.headers.get("x-forwarded-for") || "").split(",")[0]?.trim() ||
+		""
+	);
+}
 const htmlPath = new URL("../public/dashboard.html", import.meta.url);
 // Mapbox public token is injected at serve time (it's a client-side public
 // token, but GitHub push-protection blocks it from the repo).
@@ -52,9 +62,12 @@ const server = Bun.serve({
 		// Public demo controls (simulate a cheating agent / reset).
 		if (url.pathname.startsWith("/api/v1/demo/") && req.method === "POST") {
 			try {
+				const ip = clientIp(req);
 				const r = await fetch(`${CORE}${url.pathname}`, {
 					method: "POST",
-					headers: { "content-type": "application/json" },
+					headers: ip
+						? { "content-type": "application/json", "x-forwarded-for": ip }
+						: { "content-type": "application/json" },
 					body: await req.text(),
 				});
 				return new Response(await r.text(), {

@@ -319,7 +319,8 @@ function dirLine(s,arrow){
 async function simulateCheat(){
   const b=document.getElementById("cheatBtn");
   b.disabled=true; b.textContent="▶ simulating…";
-  try{ await fetch("/api/v1/demo/cheat",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}); }catch(e){}
+  try{ const r=await (await fetch("/api/v1/demo/cheat",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})).json();
+       if(r&&r.busy) b.textContent=`▶ busy — wait ${r.ttl}s`; }catch(e){}
   setTimeout(()=>{ b.disabled=false; b.textContent="▶ Simulate a cheating agent"; }, 3000);
   tick();
 }
@@ -333,23 +334,27 @@ async function resetDemo(){
 async function simulateSlaBreach(){
   const b=document.getElementById("slaBtn");
   b.disabled=true; b.textContent="▶ injecting breach…";
-  try{ await fetch("/api/v1/demo/sla-breach",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}); }catch(e){}
+  try{ const r=await (await fetch("/api/v1/demo/sla-breach",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})).json();
+       if(r&&r.busy) b.textContent=`▶ busy — wait ${r.ttl}s`; else if(r&&r.ok===false) b.textContent="▶ hourly cap reached"; }catch(e){}
   setTimeout(()=>{ b.disabled=false; b.textContent="▶ Simulate SLA breach"; tick(); }, 3000);
   tick();
 }
 async function rerunMesh(){
+  if(!confirm("This tears down the ENTIRE live mesh and rebuilds it from zero — takes ~2–4 min. Continue?")) return;
   const b=document.getElementById("rerunBtn");
   b.disabled=true; b.textContent="⟳ resetting…";
   try{
     const r=await (await fetch("/api/v1/demo/rerun",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})).json();
-    if(r&&r.busy) b.textContent=`⟳ rebuilding… (${r.ttl}s)`;
+    if(r&&r.busy){ b.textContent = r.scope==="ip" ? `⟳ you just ran this — wait ${r.ttl}s` : `⟳ rebuild in progress… (${r.ttl}s)`;
+      setTimeout(()=>{ b.disabled=false; b.textContent="⟳ Reset & rerun from zero"; }, 2500); }
   }catch(e){}
   setTimeout(tick, 1500);
 }
 async function simulateInsolvent(){
   const b=document.getElementById("poorBtn");
   b.disabled=true; b.textContent="▶ defaulting…";
-  try{ await fetch("/api/v1/demo/insolvent",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}); }catch(e){}
+  try{ const r=await (await fetch("/api/v1/demo/insolvent",{method:"POST",headers:{"content-type":"application/json"},body:"{}"})).json();
+       if(r&&r.busy) b.textContent=`▶ busy — wait ${r.ttl}s`; }catch(e){}
   setTimeout(()=>{ b.disabled=false; b.textContent="▶ Simulate insufficient balance"; tick(); }, 3000);
   tick();
 }

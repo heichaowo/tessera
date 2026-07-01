@@ -16,6 +16,7 @@ import { timingSafeCompare } from "../common/helpers";
 import config from "../config";
 import { getModels } from "../db/dbContext";
 import { getRedis } from "../db/redisContext";
+import { getClientKey } from "../middleware/rateLimiter";
 
 const LOCK = "demo:rerun:lock";
 const FLAG = "demo:rerun:requested";
@@ -34,6 +35,16 @@ function authed(c: Context): boolean {
 /** POST /api/v1/demo/rerun — public: reset the mesh + flag a rebuild. */
 export async function demoRerunHandler(c: Context): Promise<Response> {
 	const redis = getRedis();
+	// Per-IP guard: one visitor can't monopolise the rebuild (5 min/IP); the
+	// global cooldown below still paces everyone.
+	const ip = getClientKey(c);
+	if (ip && ip !== "unknown") {
+		const okIp = await redis.set(`demo:rerun:ip:${ip}`, "1", "EX", 300, "NX");
+		if (!okIp) {
+			const t = await redis.ttl(`demo:rerun:ip:${ip}`);
+			return c.json({ ok: false, busy: true, scope: "ip", ttl: t > 0 ? t : 300 });
+		}
+	}
 	// Atomic acquire: SET NX EX in one round-trip so concurrent clicks can't both
 	// pass the guard and double-fire the destructive teardown (and the TTL can't
 	// be lost between a separate SET and EXPIRE).

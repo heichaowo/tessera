@@ -62,7 +62,7 @@ const ROUTE_LIMITS: Record<string, RateLimitConfig> = {
  * Uses TRUSTED_PROXY_COUNT to pick the correct IP from X-Forwarded-For.
  * Default 1 (typical single reverse proxy like nginx).
  */
-function getClientKey(c: Context): string {
+export function getClientKey(c: Context): string {
 	const trustedHops = Number(process.env.TRUSTED_PROXY_COUNT) || 1;
 
 	const forwarded = c.req.header("X-Forwarded-For");

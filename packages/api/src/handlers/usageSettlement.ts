@@ -4,6 +4,7 @@ import config from "../config";
 import { getModels } from "../db/dbContext";
 import { getRedis } from "../db/redisContext";
 import { requireGatewayPayment } from "../services/x402";
+import { demoGuard } from "./demoGuard";
 import { isPoor } from "./demoInsolvency";
 
 function authed(c: Context): boolean {
@@ -96,6 +97,8 @@ export async function demoCheatHandler(c: Context): Promise<Response> {
 		await redis.del(key);
 		return c.json({ active: false, node: CHEAT_NODE });
 	}
+	const throttled = await demoGuard(c, "cheat", 15, 30);
+	if (throttled) return throttled;
 	await redis.set(key, String(CHEAT_FACTOR));
 	await redis.expire(key, CHEAT_TTL);
 	return c.json({

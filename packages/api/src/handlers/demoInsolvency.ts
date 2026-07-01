@@ -12,6 +12,7 @@ import type { Context } from "hono";
 import config from "../config";
 import { getModels } from "../db/dbContext";
 import { getRedis } from "../db/redisContext";
+import { demoGuard } from "./demoGuard";
 
 const POOR_TTL = 90; // seconds — auto-reverts so a public page never gets stuck
 const DEFAULTS = "payment_defaults";
@@ -35,6 +36,8 @@ async function recordDefault(node: string, reason: string): Promise<void> {
  * (instant dashboard feedback). Defaults to a non-provider node, round-robin.
  */
 export async function demoInsolventHandler(c: Context): Promise<Response> {
+	const throttled = await demoGuard(c, "insolvent", 15, 30);
+	if (throttled) return throttled;
 	const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
 	const redis = getRedis();
 	const models = getModels();

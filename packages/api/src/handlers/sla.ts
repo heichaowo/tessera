@@ -14,6 +14,7 @@ import { timingSafeCompare } from "../common/helpers";
 import config from "../config";
 import { getModels } from "../db/dbContext";
 import { getRedis } from "../db/redisContext";
+import { demoGuard } from "./demoGuard";
 
 const KEY = "sla:credits";
 
@@ -127,9 +128,16 @@ export async function slaPaidHandler(c: Context): Promise<Response> {
  * customer is given, round-robins across HK's peers.
  */
 export async function demoSlaBreachHandler(c: Context): Promise<Response> {
+	const throttled = await demoGuard(c, "sla", 30, 60);
+	if (throttled) return throttled;
 	const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
 	const models = getModels();
 	const redis = getRedis();
+	// Hourly cap on the real testnet USDC this button can drain (30 × $0.002).
+	const hits = Number(await redis.incr("demo:sla:hour"));
+	if (hits === 1) await redis.expire("demo:sla:hour", 3600);
+	if (hits > 30)
+		return c.json({ ok: false, reason: "hourly SLA-demo cap reached — resets within the hour" });
 	let customer = String(b.customer || "");
 	if (!customer) {
 		const provider = await models.routers.findOne({
